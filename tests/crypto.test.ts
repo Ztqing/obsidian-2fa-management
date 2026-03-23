@@ -7,6 +7,7 @@ import type { TotpEntryRecord } from "../src/types";
 const sampleEntries: TotpEntryRecord[] = [
 	{
 		id: "entry-1",
+		sortOrder: 0,
 		issuer: "GitHub",
 		accountName: "name@example.com",
 		secret: "JBSWY3DPEHPK3PXP",

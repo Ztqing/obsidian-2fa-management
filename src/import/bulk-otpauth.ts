@@ -1,4 +1,8 @@
-import { sortTotpEntries } from "../data/store";
+import {
+	getNextTotpSortOrder,
+	reindexTotpEntries,
+	sortTotpEntries,
+} from "../data/store";
 import { parseOtpauthUri } from "../totp/otpauth";
 import type {
 	BulkOtpauthImportCommitResult,
@@ -151,17 +155,21 @@ export function applyBulkOtpauthImportPreview(
 	options: BulkOtpauthImportApplyOptions,
 ): BulkOtpauthImportCommitResult {
 	const selectedDuplicateLineNumbers = new Set(options.selectedDuplicateLineNumbers);
+	const orderedExistingEntries = sortTotpEntries(options.existingEntries);
 	const nextEntriesById = new Map(
-		options.existingEntries.map((entry) => [entry.id, entry] as const),
+		orderedExistingEntries.map((entry) => [entry.id, entry] as const),
 	);
 	const addedEntries: TotpEntryRecord[] = [];
 	const replacedEntries: TotpEntryRecord[] = [];
+	let nextSortOrder = getNextTotpSortOrder(orderedExistingEntries);
 
 	for (const newEntry of preview.newEntries) {
 		const record: TotpEntryRecord = {
 			id: options.createId(),
+			sortOrder: nextSortOrder,
 			...newEntry.entry,
 		};
+		nextSortOrder += 1;
 		addedEntries.push(record);
 		nextEntriesById.set(record.id, record);
 	}
@@ -173,14 +181,17 @@ export function applyBulkOtpauthImportPreview(
 
 		const record: TotpEntryRecord = {
 			id: duplicateEntry.existingEntry.id,
+			sortOrder: duplicateEntry.existingEntry.sortOrder,
 			...duplicateEntry.entry,
 		};
 		replacedEntries.push(record);
 		nextEntriesById.set(record.id, record);
 	}
 
+	const nextEntries = reindexTotpEntries([...nextEntriesById.values()]);
+
 	return {
-		nextEntries: sortTotpEntries([...nextEntriesById.values()]),
+		nextEntries,
 		addedEntries,
 		replacedEntries,
 		skippedDuplicateExistingEntries: preview.duplicateExistingEntries.filter(

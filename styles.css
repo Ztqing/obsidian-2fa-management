@@ -29,6 +29,34 @@
 	gap: 0.85rem;
 }
 
+.twofa-selection-toolbar {
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+	margin-bottom: 1rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid color-mix(
+		in srgb,
+		var(--interactive-accent) 35%,
+		var(--background-modifier-border) 65%
+	);
+	border-radius: 1rem;
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 88%,
+		var(--interactive-accent) 12%
+	);
+}
+
+.twofa-selection-toolbar__summary {
+	font-weight: 700;
+}
+
+.twofa-selection-toolbar__hint {
+	color: var(--text-muted);
+	font-size: 0.9rem;
+}
+
 .twofa-entry-card {
 	padding: 0.9rem;
 	border: 1px solid var(--background-modifier-border);
@@ -38,6 +66,69 @@
 		color-mix(in srgb, var(--background-primary) 90%, var(--interactive-accent) 10%),
 		var(--background-primary)
 	);
+	cursor: pointer;
+	transition:
+		border-color 140ms ease,
+		transform 140ms ease,
+		box-shadow 140ms ease;
+}
+
+.twofa-entry-card:hover {
+	border-color: color-mix(
+		in srgb,
+		var(--background-modifier-border) 35%,
+		var(--interactive-accent) 65%
+	);
+	transform: translateY(-1px);
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+}
+
+.twofa-entry-card:focus-visible {
+	outline: none;
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.twofa-entry-card.is-selection-mode {
+	cursor: grab;
+}
+
+.twofa-entry-card.is-selection-mode.is-selected {
+	border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border) 35%);
+	background: linear-gradient(
+		160deg,
+		color-mix(in srgb, var(--background-primary) 82%, var(--interactive-accent) 18%),
+		color-mix(in srgb, var(--background-primary) 90%, var(--interactive-accent) 10%)
+	);
+}
+
+.twofa-entry-card.is-dragging {
+	opacity: 0.55;
+	transform: scale(0.985);
+}
+
+.twofa-entry-card.is-drop-before,
+.twofa-entry-card.is-drop-after {
+	position: relative;
+}
+
+.twofa-entry-card.is-drop-before::before,
+.twofa-entry-card.is-drop-after::after {
+	content: "";
+	position: absolute;
+	left: 0.9rem;
+	right: 0.9rem;
+	height: 2px;
+	border-radius: 999px;
+	background: var(--interactive-accent);
+}
+
+.twofa-entry-card.is-drop-before::before {
+	top: -0.45rem;
+}
+
+.twofa-entry-card.is-drop-after::after {
+	bottom: -0.45rem;
 }
 
 .twofa-entry-card__header {
@@ -46,6 +137,12 @@
 	justify-content: space-between;
 	gap: 0.75rem;
 	margin-bottom: 0.8rem;
+}
+
+.twofa-entry-card__header-meta {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
 }
 
 .twofa-entry-card__title {
@@ -70,6 +167,35 @@
 	white-space: nowrap;
 }
 
+.twofa-entry-card__selection-indicator {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.45rem;
+	height: 1.45rem;
+	border: 1px solid color-mix(
+		in srgb,
+		var(--interactive-accent) 40%,
+		var(--background-modifier-border) 60%
+	);
+	border-radius: 999px;
+	background: color-mix(
+		in srgb,
+		var(--background-secondary) 82%,
+		var(--interactive-accent) 18%
+	);
+	color: var(--interactive-accent);
+	font-size: 0.8rem;
+	font-weight: 700;
+}
+
+.twofa-entry-card__drag-handle {
+	color: var(--text-muted);
+	font-size: 1rem;
+	letter-spacing: -0.1em;
+	user-select: none;
+}
+
 .twofa-entry-card__code-row {
 	display: flex;
 	align-items: center;
@@ -84,6 +210,14 @@
 	letter-spacing: 0.12em;
 }
 
+.twofa-entry-card__status {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.45rem;
+	min-width: 6.25rem;
+}
+
 .twofa-entry-card__countdown {
 	min-width: 4.5rem;
 	color: var(--text-muted);
@@ -91,8 +225,63 @@
 	font-size: 0.9rem;
 }
 
-.twofa-entry-card__actions {
-	justify-content: flex-start;
+.twofa-entry-card__progress {
+	overflow: hidden;
+	width: 100%;
+	height: 0.3rem;
+	border-radius: 999px;
+	background: color-mix(
+		in srgb,
+		var(--background-modifier-border) 75%,
+		var(--background-secondary) 25%
+	);
+}
+
+.twofa-entry-card__progress-fill {
+	height: 100%;
+	width: 0%;
+	border-radius: inherit;
+	background: color-mix(in srgb, var(--interactive-accent) 72%, var(--text-success) 28%);
+	transition:
+		width 160ms linear,
+		background 160ms ease;
+}
+
+.twofa-entry-card__progress-fill.is-warning {
+	background: color-mix(in srgb, var(--text-warning) 75%, var(--interactive-accent) 25%);
+}
+
+.twofa-entry-card__next-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid color-mix(
+		in srgb,
+		var(--background-modifier-border) 78%,
+		transparent
+	);
+}
+
+.twofa-entry-card__next-label,
+.twofa-entry-card__next-countdown {
+	color: var(--text-muted);
+	font-size: 0.85rem;
+}
+
+.twofa-entry-card__next-value-block {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 0.25rem;
+}
+
+.twofa-entry-card__next-code {
+	font-size: 1rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	color: var(--text-normal);
 }
 
 .twofa-empty-state {
@@ -126,6 +315,52 @@
 	min-height: 1.2rem;
 }
 
+.twofa-import-surface {
+	margin-bottom: 1rem;
+	padding: 1rem;
+	border: 1px dashed var(--interactive-accent);
+	border-radius: 1rem;
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 88%,
+		var(--interactive-accent) 12%
+	);
+	cursor: pointer;
+	transition:
+		border-color 140ms ease,
+		transform 140ms ease,
+		background 140ms ease,
+		box-shadow 140ms ease;
+}
+
+.twofa-import-surface:hover,
+.twofa-import-surface:focus-visible,
+.twofa-import-surface.is-active {
+	border-color: var(--interactive-accent-hover);
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 82%,
+		var(--interactive-accent) 18%
+	);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 40%, transparent);
+	transform: translateY(-1px);
+	outline: none;
+}
+
+.twofa-import-surface__title {
+	font-weight: 700;
+}
+
+.twofa-import-surface__description,
+.twofa-import-surface__hint {
+	margin: 0.35rem 0 0;
+}
+
+.twofa-import-surface__hint {
+	color: var(--text-muted);
+	font-size: 0.9rem;
+}
+
 .twofa-modal-status.is-error,
 .twofa-entry-card__code.is-error {
 	color: var(--text-error);
@@ -133,6 +368,10 @@
 
 .twofa-modal-status.is-success {
 	color: var(--text-success);
+}
+
+.twofa-import-highlight {
+	animation: twofa-import-highlight 1.8s ease;
 }
 
 .twofa-hidden-file-input {
@@ -243,15 +482,34 @@
 	white-space: pre-wrap;
 }
 
+@keyframes twofa-import-highlight {
+	0% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-success) 35%, transparent);
+		background: color-mix(in srgb, var(--background-primary) 84%, var(--text-success) 16%);
+	}
+
+	100% {
+		box-shadow: 0 0 0 0 transparent;
+		background: transparent;
+	}
+}
+
 @media (max-width: 700px) {
 	.twofa-entry-card__header,
 	.twofa-entry-card__code-row,
+	.twofa-entry-card__next-row,
 	.twofa-bulk-import-item__header {
 		flex-direction: column;
 		align-items: flex-start;
 	}
 
-	.twofa-entry-card__countdown {
+	.twofa-entry-card__status,
+	.twofa-entry-card__next-value-block {
+		align-items: flex-start;
+	}
+
+	.twofa-entry-card__countdown,
+	.twofa-entry-card__next-countdown {
 		text-align: left;
 	}
 }

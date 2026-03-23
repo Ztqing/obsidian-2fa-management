@@ -31,6 +31,15 @@ function normalizePreferredSide(value: unknown): PreferredSide {
 	return value === "left" ? "left" : "right";
 }
 
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
+	return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
+	const parsed = typeof value === "number" ? value : Number(value);
+	return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function normalizeString(value: unknown): string {
 	return typeof value === "string" ? value.trim() : "";
 }
@@ -73,6 +82,7 @@ export function normalizePluginData(value: unknown): PluginData {
 			vault: DEFAULT_PLUGIN_DATA.vault,
 			settings: {
 				preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
+				showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
 			},
 		};
 	}
@@ -85,6 +95,10 @@ export function normalizePluginData(value: unknown): PluginData {
 		vault,
 		settings: {
 			preferredSide: normalizePreferredSide(rawSettings.preferredSide),
+			showUpcomingCodes: normalizeBoolean(
+				rawSettings.showUpcomingCodes,
+				DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+			),
 		},
 	};
 }
@@ -125,13 +139,36 @@ export function normalizeTotpEntryDraft(value: TotpEntryDraft): TotpEntryDraft {
 	};
 }
 
-export function normalizeStoredEntryRecord(value: unknown): TotpEntryRecord {
+function compareEntriesAlphabetically(
+	left: Pick<TotpEntryRecord, "accountName" | "id" | "issuer">,
+	right: Pick<TotpEntryRecord, "accountName" | "id" | "issuer">,
+): number {
+	const issuerComparison = collator.compare(left.issuer, right.issuer);
+
+	if (issuerComparison !== 0) {
+		return issuerComparison;
+	}
+
+	const accountComparison = collator.compare(left.accountName, right.accountName);
+
+	if (accountComparison !== 0) {
+		return accountComparison;
+	}
+
+	return collator.compare(left.id, right.id);
+}
+
+export function normalizeStoredEntryRecord(
+	value: unknown,
+	fallbackSortOrder = 0,
+): TotpEntryRecord {
 	if (!isRecord(value) || typeof value.id !== "string") {
 		throw createUserError("stored_entry_invalid");
 	}
 
 	return {
 		id: value.id,
+		sortOrder: normalizeNonNegativeInteger(value.sortOrder, fallbackSortOrder),
 		...normalizeTotpEntryDraft({
 			issuer: normalizeString(value.issuer),
 			accountName: normalizeString(value.accountName),
@@ -151,46 +188,56 @@ export function normalizeStoredEntryRecord(value: unknown): TotpEntryRecord {
 	};
 }
 
+export function reindexTotpEntries(entries: readonly TotpEntryRecord[]): TotpEntryRecord[] {
+	return entries.map((entry, index) => ({
+		...entry,
+		sortOrder: index,
+	}));
+}
+
 export function normalizeStoredEntries(value: unknown): TotpEntryRecord[] {
 	if (!Array.isArray(value)) {
 		throw createUserError("stored_vault_payload_invalid");
 	}
 
-	return sortTotpEntries(value.map((entry) => normalizeStoredEntryRecord(entry)));
+	return reindexTotpEntries(
+		sortTotpEntries(value.map((entry, index) => normalizeStoredEntryRecord(entry, index))),
+	);
 }
 
 export function sortTotpEntries(entries: readonly TotpEntryRecord[]): TotpEntryRecord[] {
 	return [...entries].sort((left, right) => {
-		const issuerComparison = collator.compare(left.issuer, right.issuer);
+		const sortOrderComparison = left.sortOrder - right.sortOrder;
 
-		if (issuerComparison !== 0) {
-			return issuerComparison;
+		if (sortOrderComparison !== 0) {
+			return sortOrderComparison;
 		}
 
-		const accountComparison = collator.compare(left.accountName, right.accountName);
-
-		if (accountComparison !== 0) {
-			return accountComparison;
-		}
-
-		return collator.compare(left.id, right.id);
+		return compareEntriesAlphabetically(left, right);
 	});
+}
+
+export function getNextTotpSortOrder(entries: readonly TotpEntryRecord[]): number {
+	return (
+		entries.reduce((highestSortOrder, entry) => {
+			return Math.max(highestSortOrder, entry.sortOrder);
+		}, -1) + 1
+	);
 }
 
 export function filterTotpEntries(
 	entries: readonly TotpEntryRecord[],
 	query: string,
 ): TotpEntryRecord[] {
+	const orderedEntries = sortTotpEntries(entries);
 	const normalizedQuery = query.trim().toLocaleLowerCase();
 
 	if (normalizedQuery.length === 0) {
-		return sortTotpEntries(entries);
+		return orderedEntries;
 	}
 
-	return sortTotpEntries(
-		entries.filter((entry) => {
+	return orderedEntries.filter((entry) => {
 			const haystack = `${entry.issuer} ${entry.accountName}`.toLocaleLowerCase();
 			return haystack.includes(normalizedQuery);
-		}),
-	);
+		});
 }

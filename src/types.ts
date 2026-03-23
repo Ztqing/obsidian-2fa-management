@@ -13,6 +13,7 @@ export interface EncryptedVaultData {
 
 export interface PluginSettings {
 	preferredSide: PreferredSide;
+	showUpcomingCodes: boolean;
 }
 
 export interface PluginData {
@@ -23,6 +24,7 @@ export interface PluginData {
 
 export interface TotpEntryRecord {
 	id: string;
+	sortOrder: number;
 	issuer: string;
 	accountName: string;
 	secret: string;
@@ -31,7 +33,7 @@ export interface TotpEntryRecord {
 	period: number;
 }
 
-export type TotpEntryDraft = Omit<TotpEntryRecord, "id">;
+export type TotpEntryDraft = Omit<TotpEntryRecord, "id" | "sortOrder">;
 
 export interface TotpCodeSnapshot {
 	code: string;

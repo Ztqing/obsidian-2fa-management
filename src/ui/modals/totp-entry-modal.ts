@@ -12,6 +12,12 @@ import { parseOtpauthUri, serializeOtpauthUri } from "../../totp/otpauth";
 import { parseOtpauthUriFromQrImage } from "../../totp/qr";
 import type { TotpAlgorithm, TotpEntryDraft } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
+import {
+	extractImageFileFromDataTransfer,
+	extractImageFileFromItems,
+	getChangedDraftFields,
+	type TotpEntryDraftField,
+} from "./totp-entry-import";
 
 class TotpEntryModal extends Modal {
 	private readonly plugin: TwoFactorManagementPlugin;
@@ -28,6 +34,10 @@ class TotpEntryModal extends Modal {
 	private statusEl: HTMLElement | null = null;
 	private fileInput: HTMLInputElement | null = null;
 	private readonly isEditing: boolean;
+	private readonly fieldElements: Partial<Record<TotpEntryDraftField, HTMLElement>> = {};
+	private importSurfaceEl: HTMLElement | null = null;
+	private dragDepth = 0;
+	private importHighlightTimeout: number | null = null;
 
 	constructor(
 		plugin: TwoFactorManagementPlugin,
@@ -53,6 +63,7 @@ class TotpEntryModal extends Modal {
 		this.statusEl = this.contentEl.createDiv({
 			cls: "twofa-modal-status",
 		});
+		this.renderImportSurface();
 
 		this.fileInput = this.contentEl.createEl("input", {
 			type: "file",
@@ -100,7 +111,7 @@ class TotpEntryModal extends Modal {
 				});
 			});
 
-		new Setting(this.contentEl)
+		const issuerSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.issuer.name"))
 			.setDesc(this.plugin.t("modal.entry.issuer.description"))
 			.addText((text) => {
@@ -108,8 +119,9 @@ class TotpEntryModal extends Modal {
 				text.inputEl.placeholder = this.plugin.t("modal.entry.issuer.placeholder");
 				text.setValue(this.initialDraft.issuer);
 			});
+		this.fieldElements.issuer = this.issuerInput?.inputEl ?? issuerSetting.settingEl;
 
-		new Setting(this.contentEl)
+		const accountNameSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.accountName.name"))
 			.setDesc(this.plugin.t("modal.entry.accountName.description"))
 			.addText((text) => {
@@ -117,8 +129,10 @@ class TotpEntryModal extends Modal {
 				text.inputEl.placeholder = this.plugin.t("modal.entry.accountName.placeholder");
 				text.setValue(this.initialDraft.accountName);
 			});
+		this.fieldElements.accountName =
+			this.accountNameInput?.inputEl ?? accountNameSetting.settingEl;
 
-		new Setting(this.contentEl)
+		const secretSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.secret.name"))
 			.setDesc(this.plugin.t("modal.entry.secret.description"))
 			.addText((text) => {
@@ -128,8 +142,9 @@ class TotpEntryModal extends Modal {
 				text.inputEl.autocomplete = "off";
 				text.setValue(this.initialDraft.secret);
 			});
+		this.fieldElements.secret = this.secretInput?.inputEl ?? secretSetting.settingEl;
 
-		new Setting(this.contentEl)
+		const algorithmSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.algorithm.name"))
 			.setDesc(this.plugin.t("modal.entry.algorithm.description"))
 			.addDropdown((dropdown) => {
@@ -141,8 +156,10 @@ class TotpEntryModal extends Modal {
 				});
 				dropdown.setValue(this.initialDraft.algorithm);
 			});
+		this.fieldElements.algorithm =
+			this.algorithmInput?.selectEl ?? algorithmSetting.settingEl;
 
-		new Setting(this.contentEl)
+		const digitsSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.digits.name"))
 			.setDesc(this.plugin.t("modal.entry.digits.description"))
 			.addText((text) => {
@@ -152,8 +169,9 @@ class TotpEntryModal extends Modal {
 				text.inputEl.max = "10";
 				text.setValue(String(this.initialDraft.digits));
 			});
+		this.fieldElements.digits = this.digitsInput?.inputEl ?? digitsSetting.settingEl;
 
-		new Setting(this.contentEl)
+		const periodSetting = new Setting(this.contentEl)
 			.setName(this.plugin.t("modal.entry.period.name"))
 			.setDesc(this.plugin.t("modal.entry.period.description"))
 			.addText((text) => {
@@ -163,9 +181,22 @@ class TotpEntryModal extends Modal {
 				text.inputEl.max = "300";
 				text.setValue(String(this.initialDraft.period));
 			});
+		this.fieldElements.period = this.periodInput?.inputEl ?? periodSetting.settingEl;
 
 		this.modalEl.addEventListener("paste", (event) => {
 			void this.handlePaste(event);
+		});
+		this.modalEl.addEventListener("dragenter", (event) => {
+			this.handleDragEnter(event);
+		});
+		this.modalEl.addEventListener("dragover", (event) => {
+			this.handleDragOver(event);
+		});
+		this.modalEl.addEventListener("dragleave", (event) => {
+			this.handleDragLeave(event);
+		});
+		this.modalEl.addEventListener("drop", (event) => {
+			void this.handleDrop(event);
 		});
 
 		const actions = new Setting(this.contentEl);
@@ -195,6 +226,10 @@ class TotpEntryModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty();
+		if (this.importHighlightTimeout !== null) {
+			window.clearTimeout(this.importHighlightTimeout);
+			this.importHighlightTimeout = null;
+		}
 
 		if (!this.settled) {
 			this.resolve(null);
@@ -221,6 +256,39 @@ class TotpEntryModal extends Modal {
 		this.periodInput?.setValue(String(draft.period));
 	}
 
+	private renderImportSurface(): void {
+		const surface = this.contentEl.createDiv({
+			cls: "twofa-import-surface",
+		});
+		surface.tabIndex = 0;
+		surface.setAttribute("role", "button");
+		surface.setAttribute("aria-label", this.plugin.t("modal.entry.importImage.surfaceLabel"));
+		surface.createEl("div", {
+			cls: "twofa-import-surface__title",
+			text: this.plugin.t("modal.entry.importImage.surfaceTitle"),
+		});
+		surface.createEl("p", {
+			cls: "twofa-import-surface__description",
+			text: this.plugin.t("modal.entry.importImage.surfaceDescription"),
+		});
+		surface.createEl("p", {
+			cls: "twofa-import-surface__hint",
+			text: this.plugin.t("modal.entry.importImage.surfaceHint"),
+		});
+		surface.addEventListener("click", () => {
+			this.fileInput?.click();
+		});
+		surface.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter" && event.key !== " ") {
+				return;
+			}
+
+			event.preventDefault();
+			this.fileInput?.click();
+		});
+		this.importSurfaceEl = surface;
+	}
+
 	private async maybeParseUri(value: string): Promise<void> {
 		const trimmedValue = value.trim();
 
@@ -239,8 +307,10 @@ class TotpEntryModal extends Modal {
 
 	private async importFromUri(value: string, showSuccess = true): Promise<void> {
 		try {
+			const currentDraft = this.readDraftFromInputs();
 			const parsedDraft = parseOtpauthUri(value);
 			this.applyDraft(parsedDraft);
+			this.highlightChangedFields(currentDraft, parsedDraft);
 			this.setStatus(this.plugin.t("modal.entry.status.importedLink"), false);
 			if (showSuccess) {
 				new Notice(this.plugin.t("notice.linkImported"));
@@ -250,30 +320,93 @@ class TotpEntryModal extends Modal {
 		}
 	}
 
-	private async importQrImage(file: Blob): Promise<void> {
+	private async importQrImage(
+		file: Blob,
+		source: "clipboard" | "drop" | "picker" = "picker",
+	): Promise<void> {
 		try {
+			this.setStatus(this.plugin.t("modal.entry.status.readingImage"), false);
+			const currentDraft = this.readDraftFromInputs();
 			const uri = await parseOtpauthUriFromQrImage(file);
 			const parsedDraft = parseOtpauthUri(uri);
 			this.uriInput?.setValue(uri);
 			this.applyDraft(parsedDraft);
-			this.setStatus(this.plugin.t("modal.entry.status.importedImage"), false);
+			this.highlightChangedFields(currentDraft, parsedDraft);
+			this.setStatus(
+				this.plugin.t(
+					source === "clipboard"
+						? "modal.entry.status.importedPastedImage"
+						: source === "drop"
+							? "modal.entry.status.importedDroppedImage"
+							: "modal.entry.status.importedImage",
+				),
+				false,
+			);
 			new Notice(this.plugin.t("notice.imageImported"));
 		} catch (error) {
+			this.clearImportSurfaceState();
 			this.setStatus(this.getErrorMessage(error), true);
 		}
 	}
 
 	private async handlePaste(event: ClipboardEvent): Promise<void> {
-		const clipboardItems = Array.from(event.clipboardData?.items ?? []);
-		const imageItem = clipboardItems.find((item) => item.type.startsWith("image/"));
-		const imageFile = imageItem?.getAsFile();
+		const imageFile = extractImageFileFromItems(event.clipboardData?.items ?? []);
 
 		if (!imageFile) {
 			return;
 		}
 
 		event.preventDefault();
-		await this.importQrImage(imageFile);
+		this.setImportSurfaceState("is-active");
+		await this.importQrImage(imageFile, "clipboard");
+	}
+
+	private handleDragEnter(event: DragEvent): void {
+		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		this.dragDepth += 1;
+		this.setImportSurfaceState("is-active");
+	}
+
+	private handleDragOver(event: DragEvent): void {
+		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "copy";
+		}
+		this.setImportSurfaceState("is-active");
+	}
+
+	private handleDragLeave(event: DragEvent): void {
+		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+			return;
+		}
+
+		event.preventDefault();
+		this.dragDepth = Math.max(0, this.dragDepth - 1);
+
+		if (this.dragDepth === 0) {
+			this.clearImportSurfaceState();
+		}
+	}
+
+	private async handleDrop(event: DragEvent): Promise<void> {
+		const imageFile = extractImageFileFromDataTransfer(event.dataTransfer);
+
+		if (!imageFile) {
+			return;
+		}
+
+		event.preventDefault();
+		this.dragDepth = 0;
+		this.setImportSurfaceState("is-active");
+		await this.importQrImage(imageFile, "drop");
 	}
 
 	private async handleSubmit(): Promise<void> {
@@ -297,6 +430,43 @@ class TotpEntryModal extends Modal {
 		this.statusEl.setText(message);
 		this.statusEl.toggleClass("is-error", isError);
 		this.statusEl.toggleClass("is-success", !isError && message.length > 0);
+	}
+
+	private highlightChangedFields(previous: TotpEntryDraft, next: TotpEntryDraft): void {
+		this.clearImportSurfaceState();
+		this.clearImportHighlights();
+		const changedFields = getChangedDraftFields(previous, next);
+
+		if (changedFields.length === 0) {
+			return;
+		}
+
+		for (const field of changedFields) {
+			this.fieldElements[field]?.addClass("twofa-import-highlight");
+		}
+
+		this.importHighlightTimeout = window.setTimeout(() => {
+			this.clearImportHighlights();
+		}, 1800);
+	}
+
+	private clearImportHighlights(): void {
+		if (this.importHighlightTimeout !== null) {
+			window.clearTimeout(this.importHighlightTimeout);
+			this.importHighlightTimeout = null;
+		}
+
+		for (const element of Object.values(this.fieldElements)) {
+			element?.removeClass("twofa-import-highlight");
+		}
+	}
+
+	private setImportSurfaceState(stateClassName: string): void {
+		this.importSurfaceEl?.addClass(stateClassName);
+	}
+
+	private clearImportSurfaceState(): void {
+		this.importSurfaceEl?.removeClass("is-active");
 	}
 
 	private finish(draft: TotpEntryDraft | null): void {

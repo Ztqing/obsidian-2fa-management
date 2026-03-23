@@ -10,6 +10,7 @@ import type { TotpEntryRecord } from "../src/types";
 const existingEntries: TotpEntryRecord[] = [
 	{
 		id: "existing-github",
+		sortOrder: 0,
 		issuer: "GitHub",
 		accountName: "name@example.com",
 		secret: "JBSWY3DPEHPK3PXP",
@@ -109,6 +110,8 @@ test("applyBulkOtpauthImportPreview skips existing duplicates by default", () =>
 	assert.equal(result.nextEntries.length, 2);
 	assert.equal(result.nextEntries[0]?.id, "existing-github");
 	assert.equal(result.nextEntries[1]?.id, "generated-1");
+	assert.equal(result.nextEntries[0]?.sortOrder, 0);
+	assert.equal(result.nextEntries[1]?.sortOrder, 1);
 });
 
 test("applyBulkOtpauthImportPreview replaces selected duplicates and preserves the original id", () => {
@@ -125,8 +128,35 @@ test("applyBulkOtpauthImportPreview replaces selected duplicates and preserves t
 	assert.equal(result.addedEntries.length, 0);
 	assert.equal(result.replacedEntries.length, 1);
 	assert.equal(result.replacedEntries[0]?.id, "existing-github");
+	assert.equal(result.replacedEntries[0]?.sortOrder, 0);
 	assert.equal(result.replacedEntries[0]?.secret, "GEZDGNBVGY3TQOJQ");
 	assert.equal(result.nextEntries.length, 1);
 	assert.equal(result.nextEntries[0]?.id, "existing-github");
+	assert.equal(result.nextEntries[0]?.sortOrder, 0);
 	assert.equal(result.nextEntries[0]?.secret, "GEZDGNBVGY3TQOJQ");
+});
+
+test("applyBulkOtpauthImportPreview appends new entries after the existing manual order", () => {
+	const preview = createPreview(
+		[
+			"otpauth://totp/GitLab:dev@example.com?secret=KRUGS4ZANFZSAYJA&issuer=GitLab",
+			"otpauth://totp/Google:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Google",
+		].join("\n"),
+		existingEntries,
+	);
+	let idCounter = 0;
+	const result = applyBulkOtpauthImportPreview(preview, {
+		existingEntries,
+		selectedDuplicateLineNumbers: [],
+		createId: () => `generated-${++idCounter}`,
+	});
+
+	assert.deepEqual(
+		result.nextEntries.map((entry) => [entry.id, entry.sortOrder]),
+		[
+			["existing-github", 0],
+			["generated-1", 1],
+			["generated-2", 2],
+		],
+	);
 });

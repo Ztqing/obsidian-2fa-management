@@ -33,6 +33,15 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
+			.setName(this.plugin.t("settings.showUpcomingCodes.name"))
+			.setDesc(this.plugin.t("settings.showUpcomingCodes.description"))
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.shouldShowUpcomingCodes()).onChange((value) => {
+					void this.plugin.setShowUpcomingCodes(value);
+				});
+			});
+
+		new Setting(containerEl)
 			.setName(this.plugin.t("settings.openView.name"))
 			.setDesc(this.plugin.t("settings.openView.description"))
 			.addButton((button) => {

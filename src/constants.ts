@@ -31,6 +31,7 @@ export const DEFAULT_PLUGIN_DATA: PluginData = {
 	vault: null,
 	settings: {
 		preferredSide: "right",
+		showUpcomingCodes: false,
 	},
 };
 

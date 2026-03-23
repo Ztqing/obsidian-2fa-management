@@ -1,8 +1,10 @@
 import { Notice, Plugin, getLanguage, type WorkspaceLeaf } from "obsidian";
 import { DEFAULT_PLUGIN_DATA, OBSIDIAN_2FA_VIEW } from "./constants";
 import {
+	getNextTotpSortOrder,
 	normalizePluginData,
 	normalizeTotpEntryDraft,
+	reindexTotpEntries,
 	sortTotpEntries,
 } from "./data/store";
 import { USER_ERROR_TRANSLATION_KEYS, createUserError, isTwoFaUserError } from "./errors";
@@ -77,6 +79,16 @@ export default class TwoFactorManagementPlugin extends Plugin {
 	async setPreferredSide(side: PreferredSide): Promise<void> {
 		this.pluginData.settings.preferredSide = side;
 		await this.persistPluginData();
+	}
+
+	shouldShowUpcomingCodes(): boolean {
+		return this.pluginData.settings.showUpcomingCodes;
+	}
+
+	async setShowUpcomingCodes(value: boolean): Promise<void> {
+		this.pluginData.settings.showUpcomingCodes = value;
+		await this.persistPluginData();
+		await this.refreshAllViews();
 	}
 
 	async open2FAView(): Promise<WorkspaceLeaf> {
@@ -318,6 +330,39 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		}
 	}
 
+	async confirmAndDeleteEntries(entries: readonly TotpEntryRecord[]): Promise<boolean> {
+		if (entries.length === 0) {
+			return false;
+		}
+
+		const confirmed = await confirmAction(this.app, {
+			title: this.t("confirm.deleteEntries.title"),
+			description: this.t("confirm.deleteEntries.description", {
+				count: entries.length,
+			}),
+			confirmLabel: this.t("confirm.deleteEntries.confirmLabel"),
+			cancelLabel: this.t("common.cancel"),
+			warning: true,
+		});
+
+		if (!confirmed) {
+			return false;
+		}
+
+		try {
+			await this.deleteEntries(entries.map((entry) => entry.id));
+			new Notice(
+				this.t("notice.entriesDeleted", {
+					count: entries.length,
+				}),
+			);
+			return true;
+		} catch (error) {
+			this.showErrorNotice(error);
+			return false;
+		}
+	}
+
 	async confirmAndResetVault(): Promise<boolean> {
 		const confirmed = await confirmAction(this.app, {
 			title: this.t("confirm.clearVault.title"),
@@ -430,13 +475,15 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	private async addEntry(draft: TotpEntryDraft): Promise<void> {
 		const normalizedDraft = normalizeTotpEntryDraft(draft);
-		const nextEntries = sortTotpEntries([
-			...this.requireUnlockedEntries(),
+		const existingEntries = sortTotpEntries(this.requireUnlockedEntries());
+		const nextEntries = [
+			...existingEntries,
 			{
 				id: createRandomId(),
+				sortOrder: getNextTotpSortOrder(existingEntries),
 				...normalizedDraft,
 			},
-		]);
+		];
 		await this.replaceUnlockedEntries(nextEntries);
 	}
 
@@ -449,6 +496,7 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 			return {
 				id: entry.id,
+				sortOrder: entry.sortOrder,
 				...normalizedDraft,
 			};
 		});
@@ -460,8 +508,42 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		await this.replaceUnlockedEntries(nextEntries);
 	}
 
+	private async deleteEntries(entryIds: readonly string[]): Promise<void> {
+		const idsToDelete = new Set(entryIds);
+		const nextEntries = this.requireUnlockedEntries().filter((entry) => !idsToDelete.has(entry.id));
+		await this.replaceUnlockedEntries(nextEntries);
+	}
+
+	async reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void> {
+		const currentEntries = sortTotpEntries(this.requireUnlockedEntries());
+		const entriesById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
+		const seenIds = new Set<string>();
+		const nextEntries: TotpEntryRecord[] = [];
+
+		for (const entryId of nextOrderedIds) {
+			const entry = entriesById.get(entryId);
+
+			if (!entry || seenIds.has(entryId)) {
+				continue;
+			}
+
+			nextEntries.push(entry);
+			seenIds.add(entryId);
+		}
+
+		for (const entry of currentEntries) {
+			if (seenIds.has(entry.id)) {
+				continue;
+			}
+
+			nextEntries.push(entry);
+		}
+
+		await this.replaceUnlockedEntries(nextEntries);
+	}
+
 	private async replaceUnlockedEntries(entries: TotpEntryRecord[]): Promise<void> {
-		this.unlockedEntries = sortTotpEntries(entries);
+		this.unlockedEntries = reindexTotpEntries(entries);
 		await this.reencryptUnlockedEntries(this.sessionPassword);
 		await this.refreshAllViews();
 	}
