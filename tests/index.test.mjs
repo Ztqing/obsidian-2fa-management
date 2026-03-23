@@ -13,5 +13,7 @@ await jiti.import("./i18n.test.ts");
 await jiti.import("./otpauth.test.ts");
 await jiti.import("./provider-icons.test.ts");
 await jiti.import("./qr.test.ts");
+await jiti.import("./totp-manager-view-state.test.ts");
 await jiti.import("./totp-entry-import.test.ts");
 await jiti.import("./totp.test.ts");
+await jiti.import("./vault-service.test.ts");
