@@ -66,6 +66,15 @@ export class TwoFactorVaultService {
 		await this.persistPluginData();
 	}
 
+	shouldShowFloatingLockButton(): boolean {
+		return this.pluginData.settings.showFloatingLockButton;
+	}
+
+	async setShowFloatingLockButton(value: boolean): Promise<void> {
+		this.pluginData.settings.showFloatingLockButton = value;
+		await this.persistPluginData();
+	}
+
 	async initializeVault(password: string): Promise<void> {
 		this.unlockedEntries = [];
 		this.sessionPassword = password;

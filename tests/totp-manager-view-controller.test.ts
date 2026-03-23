@@ -27,13 +27,35 @@ function createControllerHarness(options: {
 	confirmDeleteResult?: boolean;
 	editResult?: boolean;
 } = {}) {
-	const state = new TotpManagerViewState();
+	let nextTimerId = 1;
+	const scheduledTimers = new Map<number, () => void>();
+	const state = new TotpManagerViewState({
+		clearTimeout: (timerId: number) => {
+			scheduledTimers.delete(timerId);
+		},
+		setTimeout: (handler: () => void) => {
+			const timerId = nextTimerId++;
+			scheduledTimers.set(timerId, handler);
+			return timerId;
+		},
+	});
 	const entries = [createEntry("entry-1"), createEntry("entry-2"), createEntry("entry-3")];
 	const callLog: string[] = [];
 	let nextDeleteResult = options.confirmDeleteResult ?? true;
 	let nextEditResult = options.editResult ?? true;
 	let latestMenu: {
-		items: { click: (() => void) | null; icon: string; title: string }[];
+		items: (
+			| {
+					click: (() => void) | null;
+					danger: boolean;
+					icon: string;
+					title: string;
+					type: "item";
+			  }
+			| {
+					type: "separator";
+			  }
+		)[];
 		mouseEvent: MouseEvent | null;
 		position:
 			| {
@@ -75,20 +97,28 @@ function createControllerHarness(options: {
 				addItem: (callback: (item: {
 					onClick(nextClick: () => void): {
 						click: (() => void) | null;
+						danger: boolean;
 						icon: string;
 						onClick(nextClick: () => void): any;
+						setDanger(isDanger?: boolean): any;
 						setIcon(icon: string): any;
 						setTitle(title: string): any;
 						title: string;
 					};
+					setDanger(isDanger?: boolean): any;
 					setIcon(icon: string): any;
 					setTitle(title: string): any;
 				}) => void) => {
 					const menuItem = {
 						click: null as (() => void) | null,
+						danger: false,
 						icon: "",
 						onClick(nextClick: () => void) {
 							this.click = nextClick;
+							return this;
+						},
+						setDanger(isDanger = true) {
+							this.danger = isDanger;
 							return this;
 						},
 						setIcon(icon: string) {
@@ -104,8 +134,16 @@ function createControllerHarness(options: {
 					callback(menuItem);
 					latestMenu?.items.push({
 						click: menuItem.click,
+						danger: menuItem.danger,
 						icon: menuItem.icon,
 						title: menuItem.title,
+						type: "item",
+					});
+					return menu;
+				},
+				addSeparator: () => {
+					latestMenu?.items.push({
+						type: "separator",
 					});
 					return menu;
 				},
@@ -207,6 +245,39 @@ function createMouseEvent(): MouseEvent {
 	} as MouseEvent;
 }
 
+function createPointerEvent(overrides: Partial<PointerEvent> = {}): PointerEvent {
+	return {
+		altKey: false,
+		button: 0,
+		clientX: 20,
+		clientY: 30,
+		ctrlKey: false,
+		metaKey: false,
+		pointerId: 1,
+		shiftKey: false,
+		target: null,
+		...overrides,
+	} as PointerEvent;
+}
+
+function getMenuItem(
+	menu: NonNullable<ReturnType<ReturnType<typeof createControllerHarness>["getLatestMenu"]>>,
+	title: string,
+): {
+	click: (() => void) | null;
+	danger: boolean;
+	icon: string;
+	title: string;
+	type: "item";
+} | null {
+	return (
+		menu.items.find(
+			(item): item is Extract<(typeof menu.items)[number], { type: "item" }> =>
+				item.type === "item" && item.title === title,
+		) ?? null
+	);
+}
+
 test("TotpManagerViewController copies a code on plain card click", async () => {
 	const harness = createControllerHarness();
 
@@ -228,6 +299,90 @@ test("TotpManagerViewController toggles selection instead of copying while in se
 	assert.equal(harness.state.isEntrySelected(harness.entries[1].id), true);
 	assert.deepEqual(harness.callLog, []);
 	assert.equal(harness.getRefreshCount(), 1);
+});
+
+test("TotpManagerViewController does not start whole-card drag while in selection mode", () => {
+	const harness = createControllerHarness();
+	harness.state.enterSelectionMode(harness.entries[0].id);
+
+	harness.controller.handleCardPointerDown(
+		harness.entries[0],
+		createPointerEvent(),
+	);
+
+	assert.equal(harness.state.getDragState(), null);
+	assert.deepEqual(harness.codeRefreshLog, []);
+});
+
+test("TotpManagerViewController starts drag in selection mode after pointer movement exceeds the threshold", () => {
+	const harness = createControllerHarness();
+	harness.state.enterSelectionMode(harness.entries[0].id);
+	harness.state.toggleEntrySelection(harness.entries[1].id);
+	const sourceCard = new FakeElement("div");
+	sourceCard.setBoundingClientRect({
+		height: 40,
+		right: 120,
+		top: 0,
+		width: 120,
+	});
+
+	harness.controller.handleCardPointerDown(
+		harness.entries[0],
+		createPointerEvent(),
+	);
+	harness.controller.handleCardPointerMove(
+		harness.entries[0],
+		sourceCard as unknown as HTMLElement,
+		createPointerEvent({
+			clientX: 32,
+			clientY: 30,
+		}),
+	);
+
+	assert.deepEqual(harness.state.getDragState(), {
+		movedIds: ["entry-1", "entry-2"],
+		overEntryId: null,
+		placement: "before",
+	});
+	assert.deepEqual(harness.codeRefreshLog, [
+		{
+			movedIds: ["entry-1", "entry-2"],
+			overEntryId: null,
+			placement: "before",
+		},
+	]);
+});
+
+test("TotpManagerViewController drags only the pressed unselected card in selection mode", () => {
+	const harness = createControllerHarness();
+	harness.state.enterSelectionMode(harness.entries[0].id);
+	harness.state.toggleEntrySelection(harness.entries[1].id);
+	const sourceCard = new FakeElement("div");
+	sourceCard.setBoundingClientRect({
+		height: 40,
+		right: 120,
+		top: 0,
+		width: 120,
+	});
+
+	harness.controller.handleCardPointerDown(
+		harness.entries[2],
+		createPointerEvent(),
+	);
+	harness.controller.handleCardPointerMove(
+		harness.entries[2],
+		sourceCard as unknown as HTMLElement,
+		createPointerEvent({
+			clientX: 32,
+			clientY: 30,
+		}),
+	);
+
+	assert.deepEqual(harness.state.getDragState(), {
+		movedIds: ["entry-3"],
+		overEntryId: null,
+		placement: "before",
+	});
 });
 
 test("TotpManagerViewController opens the keyboard menu at the card position", async () => {
@@ -264,11 +419,29 @@ test("TotpManagerViewController opens the keyboard menu at the card position", a
 		y: 130,
 	});
 	assert.deepEqual(
-		menu.items.map((item) => item.title),
-		["common.edit", "common.delete"],
+		menu.items.map((item) =>
+			item.type === "separator" ? "__separator__" : item.title,
+		),
+		["common.multiSelect", "__separator__", "common.edit", "common.delete"],
 	);
-	menu.items[0]?.click?.();
+	assert.equal(getMenuItem(menu, "common.delete")?.danger, true);
+	getMenuItem(menu, "common.edit")?.click?.();
 	assert.deepEqual(harness.callLog, ["edit:entry-1"]);
+});
+
+test("TotpManagerViewController enters selection mode from the context menu", async () => {
+	const harness = createControllerHarness();
+	const event = createMouseEvent();
+
+	harness.controller.handleCardContextMenu(harness.entries[1], event);
+	const menu = harness.getLatestMenu();
+	assert.ok(menu);
+
+	getMenuItem(menu, "common.multiSelect")?.click?.();
+
+	assert.equal(harness.state.isSelectionMode(), true);
+	assert.equal(harness.state.isEntrySelected(harness.entries[1].id), true);
+	assert.equal(harness.getRefreshCount(), 1);
 });
 
 test("TotpManagerViewController only updates selection after a successful bulk delete", async () => {
@@ -314,16 +487,9 @@ test("TotpManagerViewController exits selection mode only after a successful edi
 	assert.deepEqual(harness.callLog, ["edit:entry-1", "edit:entry-1"]);
 });
 
-test("TotpManagerViewController skips persistence when a dragged block is dropped onto itself", async () => {
+test("TotpManagerViewController skips persistence when a dragged block is released without a new target", async () => {
 	const harness = createControllerHarness();
 	harness.state.enterSelectionMode(harness.entries[0].id);
-	const dragEvent = {
-		dataTransfer: {
-			effectAllowed: "none",
-			setData() {},
-		},
-		preventDefault() {},
-	} as DragEvent;
 	const card = new FakeElement("div");
 	card.setBoundingClientRect({
 		height: 40,
@@ -332,39 +498,29 @@ test("TotpManagerViewController skips persistence when a dragged block is droppe
 		width: 120,
 	});
 
-	harness.controller.handleCardDragStart(harness.entries[0], dragEvent);
-	await harness.controller.handleCardDrop(
+	harness.state.beginDrag(harness.entries[0].id, 1);
+	await harness.controller.handleCardPointerEnd(
 		harness.entries[0],
 		card as unknown as HTMLElement,
-		{
-			clientY: 30,
-			preventDefault() {},
-		} as DragEvent,
+		createPointerEvent(),
 	);
 
 	assert.deepEqual(harness.callLog, []);
 	assert.equal(harness.state.getDragState(), null);
-	assert.deepEqual(harness.codeRefreshLog, [
-		{
-			movedIds: ["entry-1"],
-			overEntryId: null,
-			placement: "before",
-		},
-		null,
-	]);
+	assert.deepEqual(harness.codeRefreshLog, [null]);
 });
 
-test("TotpManagerViewController persists a reordered selection block and keeps it selected", async () => {
+test("TotpManagerViewController persists a reordered selection block after pointer drag", async () => {
 	const harness = createControllerHarness();
 	harness.state.enterSelectionMode(harness.entries[0].id);
 	harness.state.toggleEntrySelection(harness.entries[1].id);
-	const dragEvent = {
-		dataTransfer: {
-			effectAllowed: "none",
-			setData() {},
-		},
-		preventDefault() {},
-	} as DragEvent;
+	const sourceCard = new FakeElement("div");
+	sourceCard.setBoundingClientRect({
+		height: 40,
+		right: 120,
+		top: 0,
+		width: 120,
+	});
 	const targetCard = new FakeElement("div");
 	targetCard.setBoundingClientRect({
 		height: 40,
@@ -373,14 +529,31 @@ test("TotpManagerViewController persists a reordered selection block and keeps i
 		width: 120,
 	});
 
-	harness.controller.handleCardDragStart(harness.entries[0], dragEvent);
-	await harness.controller.handleCardDrop(
+	harness.controller.handleCardPointerDown(
+		harness.entries[0],
+		createPointerEvent(),
+	);
+	harness.controller.handleCardPointerMove(
+		harness.entries[0],
+		sourceCard as unknown as HTMLElement,
+		createPointerEvent({
+			clientX: 32,
+			clientY: 30,
+		}),
+	);
+	harness.controller.handleCardPointerMove(
 		harness.entries[2],
 		targetCard as unknown as HTMLElement,
-		{
+		createPointerEvent({
 			clientY: 30,
-			preventDefault() {},
-		} as DragEvent,
+		}),
+	);
+	await harness.controller.handleCardPointerEnd(
+		harness.entries[2],
+		targetCard as unknown as HTMLElement,
+		createPointerEvent({
+			clientY: 30,
+		}),
 	);
 
 	assert.deepEqual(harness.callLog, ["reorder:entry-3,entry-1,entry-2"]);
@@ -391,6 +564,11 @@ test("TotpManagerViewController persists a reordered selection block and keeps i
 			movedIds: ["entry-1", "entry-2"],
 			overEntryId: null,
 			placement: "before",
+		},
+		{
+			movedIds: ["entry-1", "entry-2"],
+			overEntryId: "entry-3",
+			placement: "after",
 		},
 		null,
 	]);

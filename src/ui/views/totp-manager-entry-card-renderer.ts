@@ -39,37 +39,32 @@ export class TotpManagerEntryCardRenderer {
 		showUpcomingCodes: boolean,
 	): void {
 		const isSelected = this.state.isEntrySelected(entry.id);
+		const isSelectionMode = this.state.isSelectionMode();
 		const card = listEl.createDiv({
 			cls: "twofa-entry-card",
 		});
 		card.toggleClass("is-selected", isSelected);
-		card.toggleClass("is-selection-mode", this.state.isSelectionMode());
-		card.draggable = this.state.isSelectionMode();
+		card.toggleClass("is-selection-mode", isSelectionMode);
 		card.tabIndex = 0;
-		card.setAttribute("role", this.state.isSelectionMode() ? "checkbox" : "button");
-		if (this.state.isSelectionMode()) {
+		card.setAttribute("role", isSelectionMode ? "checkbox" : "button");
+		if (isSelectionMode) {
 			card.setAttribute("aria-checked", String(isSelected));
 		}
-		card.setAttribute(
-			"aria-label",
-			this.plugin.t("view.entry.cardAriaLabel", {
-				accountName: entry.accountName,
-			}),
-		);
+
 		card.addEventListener("pointerdown", (event) => {
 			this.actions.onCardPointerDown(entry, event);
 		});
 		card.addEventListener("pointermove", (event) => {
-			this.actions.onCardPointerMove(event);
+			this.actions.onCardPointerMove(entry, card, event);
 		});
-		card.addEventListener("pointerup", () => {
-			this.actions.onCardPointerEnd();
+		card.addEventListener("pointerup", (event) => {
+			this.actions.onCardPointerEnd(entry, card, event);
 		});
-		card.addEventListener("pointerleave", () => {
-			this.actions.onCardPointerEnd();
+		card.addEventListener("pointerleave", (event) => {
+			this.actions.onCardPointerLeave(event);
 		});
-		card.addEventListener("pointercancel", () => {
-			this.actions.onCardPointerEnd();
+		card.addEventListener("pointercancel", (event) => {
+			this.actions.onCardPointerCancel(event);
 		});
 		card.addEventListener("click", (event) => {
 			this.actions.onCardClick(entry, event);
@@ -80,32 +75,6 @@ export class TotpManagerEntryCardRenderer {
 		card.addEventListener("keydown", (event) => {
 			this.actions.onCardKeyDown(entry, card, event);
 		});
-		card.addEventListener("dragstart", (event) => {
-			this.actions.onCardDragStart(entry, event);
-		});
-		card.addEventListener("dragover", (event) => {
-			this.actions.onCardDragOver(entry, card, event);
-		});
-		card.addEventListener("drop", (event) => {
-			this.actions.onCardDrop(entry, card, event);
-		});
-		card.addEventListener("dragend", () => {
-			this.actions.onCardDragEnd();
-		});
-
-		if (this.state.isSelectionMode()) {
-			const selectionControls = card.createDiv({
-				cls: "twofa-entry-card__selection-controls",
-			});
-			const manageIndicator = selectionControls.createDiv({
-				cls: "twofa-entry-card__selection-indicator",
-			});
-			manageIndicator.setText(isSelected ? "✓" : "");
-			selectionControls.createDiv({
-				cls: "twofa-entry-card__drag-handle",
-				text: "⋮⋮",
-			});
-		}
 
 		const header = card.createDiv({
 			cls: "twofa-entry-card__header",
@@ -122,37 +91,37 @@ export class TotpManagerEntryCardRenderer {
 		const titleBlock = identity.createDiv({
 			cls: "twofa-entry-card__title-block",
 		});
-		const titleRow = titleBlock.createDiv({
-			cls: "twofa-entry-card__title-row",
-		});
-		titleRow.createEl("div", {
+		const titleId = `twofa-entry-title-${entry.id}`;
+		const titleEl = titleBlock.createEl("div", {
 			cls: "twofa-entry-card__title",
 			text: entry.issuer || entry.accountName,
 		});
+		titleEl.setAttribute("id", titleId);
+		const labelledByIds = [titleId];
+
 		if (entry.issuer) {
-			titleBlock.createEl("div", {
+			const subtitleId = `twofa-entry-subtitle-${entry.id}`;
+			const subtitleEl = titleBlock.createEl("div", {
 				cls: "twofa-entry-card__subtitle",
 				text: entry.accountName,
 			});
+			subtitleEl.setAttribute("id", subtitleId);
+			labelledByIds.push(subtitleId);
 		}
 
-		const codeRow = card.createDiv({
+		card.setAttribute("aria-labelledby", labelledByIds.join(" "));
+
+		const codeSection = card.createDiv({
+			cls: "twofa-entry-card__code-section",
+		});
+		const codeRow = codeSection.createDiv({
 			cls: "twofa-entry-card__code-row",
 		});
-		const codeGroup = codeRow.createDiv({
-			cls: "twofa-entry-card__code-group",
-		});
-		const codeEl = codeGroup.createEl("code", {
+		const codeEl = codeRow.createEl("code", {
 			cls: "twofa-entry-card__code",
 		});
 		renderStaticCode(codeEl, CODE_PLACEHOLDER);
-		let nextCodeEl: HTMLElement | null = null;
-		if (showUpcomingCodes) {
-			nextCodeEl = codeGroup.createEl("code", {
-				cls: "twofa-entry-card__next-code-pill",
-			});
-			renderStaticCode(nextCodeEl, CODE_PLACEHOLDER);
-		}
+
 		const countdownBadgeEl = codeRow.createDiv({
 			cls: "twofa-entry-card__countdown-badge",
 		});
@@ -166,6 +135,21 @@ export class TotpManagerEntryCardRenderer {
 			cls: "twofa-entry-card__countdown",
 			text: "...",
 		});
+
+		let nextCodeEl: HTMLElement | null = null;
+		if (showUpcomingCodes) {
+			const supportRow = card.createDiv({
+				cls: "twofa-entry-card__supporting-row",
+			});
+			supportRow.createDiv({
+				cls: "twofa-entry-card__supporting-label",
+				text: this.plugin.t("view.entry.nextCode"),
+			});
+			nextCodeEl = supportRow.createEl("code", {
+				cls: "twofa-entry-card__next-code",
+			});
+			renderStaticCode(nextCodeEl, CODE_PLACEHOLDER);
+		}
 
 		const refs: EntryRowRefs = {
 			cardEl: card,

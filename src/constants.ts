@@ -32,6 +32,7 @@ export const DEFAULT_PLUGIN_DATA: PluginData = {
 	settings: {
 		preferredSide: "right",
 		showUpcomingCodes: false,
+		showFloatingLockButton: true,
 	},
 };
 

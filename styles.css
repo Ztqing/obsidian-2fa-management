@@ -1,20 +1,17 @@
 .twofa-view {
-	padding: 1rem;
-}
-
-.twofa-toolbar {
+	--twofa-motion-micro: 120ms;
+	--twofa-motion-state: 200ms;
+	--twofa-ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+	position: relative;
 	display: flex;
 	flex-direction: column;
-	gap: 0.75rem;
-	margin-bottom: 1rem;
+	gap: 1rem;
+	padding: 1rem;
+	padding-bottom: 1.5rem;
 }
 
-.twofa-search-input {
-	width: 100%;
-	padding: 0.6rem 0.75rem;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 0.75rem;
-	background: var(--background-primary-alt);
+.twofa-view.has-floating-lock {
+	padding-bottom: 5.75rem;
 }
 
 .twofa-inline-actions {
@@ -23,85 +20,355 @@
 	gap: 0.5rem;
 }
 
-.twofa-entry-list {
+.twofa-view__body {
 	display: flex;
 	flex-direction: column;
-	gap: 0.85rem;
+	gap: 1rem;
+	min-height: 0;
 }
 
-.twofa-summary-bar {
+.twofa-command-dock {
+	display: flex;
+	flex-direction: column;
+	gap: 0.8rem;
+	padding: 0.9rem;
+	border: 1px solid color-mix(
+		in srgb,
+		var(--background-modifier-border) 88%,
+		var(--background-primary) 12%
+	);
+	border-radius: 1rem;
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 92%,
+		var(--background-primary) 8%
+	);
+	box-shadow: 0 1px 0
+		color-mix(in srgb, var(--background-modifier-border) 55%, transparent);
+	transition:
+		border-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		background-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		box-shadow var(--twofa-motion-state) var(--twofa-ease-standard);
+}
+
+.twofa-command-dock.is-selection-mode {
+	border-color: color-mix(
+		in srgb,
+		var(--interactive-accent) 28%,
+		var(--background-modifier-border) 72%
+	);
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 88%,
+		var(--interactive-accent) 12%
+	);
+}
+
+.twofa-command-dock.is-unavailable {
+	opacity: 0.95;
+}
+
+.twofa-command-dock__row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 0.75rem;
-	margin-bottom: 1rem;
-	padding: 0.75rem 0.9rem;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 1rem;
-	background: color-mix(in srgb, var(--background-primary-alt) 92%, var(--background-primary) 8%);
+	min-width: 0;
 }
 
-.twofa-summary-bar.is-selection-mode {
+.twofa-command-dock__row--bottom {
+	align-items: stretch;
+}
+
+.twofa-command-dock__title-cluster {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	min-width: 0;
+}
+
+.twofa-command-dock__eyebrow {
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.twofa-command-dock__status {
+	font-size: 0.96rem;
+	font-weight: 650;
+	line-height: 1.3;
+	word-break: break-word;
+}
+
+.twofa-command-dock__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.4rem;
+	flex: 0 0 auto;
+}
+
+.twofa-action-pill {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 3.2rem;
+	height: 3.2rem;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	background: var(--background-primary);
+	color: var(--text-muted);
+	transition:
+		background-color var(--twofa-motion-micro) var(--twofa-ease-standard),
+		border-color var(--twofa-motion-micro) var(--twofa-ease-standard),
+		box-shadow var(--twofa-motion-micro) var(--twofa-ease-standard),
+		color var(--twofa-motion-micro) var(--twofa-ease-standard);
+}
+
+.twofa-action-pill--primary {
 	border-color: color-mix(
 		in srgb,
-		var(--interactive-accent) 35%,
-		var(--background-modifier-border) 65%
+		var(--interactive-accent) 80%,
+		var(--background-modifier-border) 20%
+	);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.twofa-action-pill--secondary {
+	background: var(--background-primary);
+	color: var(--text-muted);
+}
+
+.twofa-action-pill--danger {
+	border-color: color-mix(
+		in srgb,
+		var(--text-error) 36%,
+		var(--background-modifier-border) 64%
 	);
 	background: color-mix(
 		in srgb,
-		var(--background-primary-alt) 84%,
-		var(--interactive-accent) 16%
+		var(--background-primary) 90%,
+		var(--text-error) 10%
+	);
+	color: var(--text-error);
+}
+
+.twofa-action-pill:hover,
+.twofa-action-pill:focus-visible {
+	border-color: color-mix(
+		in srgb,
+		var(--interactive-accent) 34%,
+		var(--background-modifier-border) 66%
+	);
+	background: color-mix(
+		in srgb,
+		var(--background-primary) 82%,
+		var(--interactive-accent) 18%
+	);
+	color: var(--text-normal);
+	box-shadow: 0 10px 22px color-mix(in srgb, var(--background-modifier-box-shadow) 14%, transparent);
+	outline: none;
+}
+
+.twofa-action-pill--primary:hover,
+.twofa-action-pill--primary:focus-visible {
+	border-color: color-mix(
+		in srgb,
+		var(--interactive-accent-hover) 82%,
+		var(--background-modifier-border) 18%
+	);
+	background: var(--interactive-accent-hover);
+	color: var(--text-on-accent);
+}
+
+.twofa-action-pill--danger:hover,
+.twofa-action-pill--danger:focus-visible {
+	border-color: color-mix(
+		in srgb,
+		var(--text-error) 58%,
+		var(--background-modifier-border) 42%
+	);
+	background: color-mix(
+		in srgb,
+		var(--background-primary) 82%,
+		var(--text-error) 18%
+	);
+	color: var(--text-error);
+}
+
+.twofa-action-pill:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+	box-shadow: none;
+}
+
+.twofa-action-pill__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	--icon-size: var(--icon-m);
+}
+
+.twofa-action-pill--compact {
+	width: 2.75rem;
+	height: 2.75rem;
+}
+
+.twofa-action-pill--compact .twofa-action-pill__icon {
+	--icon-size: var(--icon-s);
+}
+
+.twofa-command-dock__actions > button:not(.twofa-action-pill) {
+	min-height: 2.65rem;
+	padding: 0 0.9rem;
+	border-radius: 0.85rem;
+}
+
+.twofa-search-shell__icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	--icon-size: var(--icon-s);
+}
+
+.twofa-command-dock__assist {
+	width: 100%;
+	color: var(--text-muted);
+	font-size: 0.88rem;
+	line-height: 1.45;
+}
+
+.twofa-search-shell {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	width: 100%;
+	min-height: 2.8rem;
+	padding: 0 0.8rem;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 0.75rem;
+	background: var(--background-primary);
+	transition:
+		border-color var(--twofa-motion-micro) var(--twofa-ease-standard),
+		box-shadow var(--twofa-motion-micro) var(--twofa-ease-standard),
+		background-color var(--twofa-motion-micro) var(--twofa-ease-standard);
+}
+
+.twofa-search-shell:hover {
+	border-color: color-mix(
+		in srgb,
+		var(--interactive-accent) 26%,
+		var(--background-modifier-border) 74%
 	);
 }
 
-.twofa-summary-bar__summary {
-	font-weight: 700;
+.twofa-search-shell:focus-within {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.twofa-search-shell__icon {
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.twofa-search-input {
+	width: 100%;
+	padding: 0.65rem 0;
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	color: inherit;
+	font: inherit;
+}
+
+.twofa-search-input:focus {
+	outline: none;
+}
+
+.twofa-search-input:disabled {
+	cursor: not-allowed;
+	color: var(--text-faint);
+}
+
+.twofa-entry-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
 }
 
 .twofa-entry-card {
 	position: relative;
 	padding: 1rem;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 1.1rem;
-	background: linear-gradient(
-		160deg,
-		color-mix(in srgb, var(--background-primary) 92%, var(--interactive-accent) 8%),
-		var(--background-primary)
+	border: 1px solid color-mix(
+		in srgb,
+		var(--background-modifier-border) 88%,
+		var(--background-primary) 12%
 	);
+	border-radius: 1.125rem;
+	background: color-mix(
+		in srgb,
+		var(--background-primary) 96%,
+		var(--background-primary-alt) 4%
+	);
+	box-shadow:
+		0 1px 0 color-mix(in srgb, var(--background-modifier-border) 55%, transparent),
+		0 8px 24px color-mix(in srgb, var(--background-modifier-box-shadow) 10%, transparent);
 	cursor: pointer;
-	transition: border-color 140ms ease, box-shadow 140ms ease;
+	transition:
+		transform var(--twofa-motion-state) var(--twofa-ease-standard),
+		border-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		background-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		box-shadow var(--twofa-motion-state) var(--twofa-ease-standard),
+		opacity var(--twofa-motion-state) var(--twofa-ease-standard);
 }
 
 .twofa-entry-card:hover {
 	border-color: color-mix(
 		in srgb,
-		var(--background-modifier-border) 35%,
-		var(--interactive-accent) 65%
+		var(--interactive-accent) 22%,
+		var(--background-modifier-border) 78%
 	);
+}
+
+.twofa-entry-card:active {
+	transform: scale(0.97);
 }
 
 .twofa-entry-card:focus-visible {
 	outline: none;
 	border-color: var(--interactive-accent);
-	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+	box-shadow:
+		0 0 0 1px color-mix(in srgb, var(--interactive-accent) 30%, transparent),
+		0 14px 28px color-mix(in srgb, var(--background-modifier-box-shadow) 16%, transparent);
 }
 
-.twofa-entry-card.is-selection-mode {
-	cursor: grab;
-}
-
-.twofa-entry-card.is-selection-mode.is-selected {
-	border-color: color-mix(in srgb, var(--interactive-accent) 65%, var(--background-modifier-border) 35%);
-	background: linear-gradient(
-		160deg,
-		color-mix(in srgb, var(--background-primary) 82%, var(--interactive-accent) 18%),
-		color-mix(in srgb, var(--background-primary) 90%, var(--interactive-accent) 10%)
+.twofa-entry-card.is-selected {
+	border-color: color-mix(
+		in srgb,
+		var(--interactive-accent) 48%,
+		var(--background-modifier-border) 52%
+	);
+	background: color-mix(
+		in srgb,
+		var(--background-primary) 90%,
+		var(--interactive-accent) 10%
 	);
 }
 
 .twofa-entry-card.is-dragging {
-	opacity: 0.55;
-	transform: scale(0.985);
+	opacity: 0.82;
+	transform: translateY(-2px);
+	box-shadow:
+		0 1px 0 color-mix(in srgb, var(--background-modifier-border) 55%, transparent),
+		0 18px 34px color-mix(in srgb, var(--background-modifier-box-shadow) 22%, transparent);
+	cursor: grabbing;
 }
 
 .twofa-entry-card.is-drop-before,
@@ -113,9 +380,9 @@
 .twofa-entry-card.is-drop-after::after {
 	content: "";
 	position: absolute;
-	left: 0.9rem;
-	right: 0.9rem;
-	height: 2px;
+	left: 1rem;
+	right: 1rem;
+	height: 3px;
 	border-radius: 999px;
 	background: var(--interactive-accent);
 }
@@ -131,54 +398,48 @@
 .twofa-entry-card__header {
 	display: flex;
 	align-items: flex-start;
-	gap: 0.85rem;
-	margin-bottom: 0.95rem;
+	justify-content: space-between;
+	gap: 0.8rem;
 }
 
 .twofa-entry-card__identity {
 	display: flex;
 	align-items: flex-start;
-	gap: 0.75rem;
-	min-width: 0;
+	gap: 0.7rem;
 	flex: 1 1 auto;
+	min-width: 0;
 }
 
 .twofa-entry-card__provider-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 2.4rem;
-	height: 2.4rem;
-	border-radius: 0.8rem;
+	width: 2rem;
+	height: 2rem;
+	border-radius: 0.65rem;
 	background: color-mix(
 		in srgb,
-		var(--background-secondary) 78%,
-		var(--interactive-accent) 22%
+		var(--background-secondary) 86%,
+		var(--background-primary) 14%
 	);
-	color: color-mix(in srgb, var(--interactive-accent) 85%, var(--text-normal) 15%);
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	color: color-mix(in srgb, var(--text-normal) 82%, var(--text-muted) 18%);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
 	flex-shrink: 0;
-	--icon-size: var(--icon-m);
+	--icon-size: var(--icon-s);
 }
 
 .twofa-entry-card__title-block {
+	display: flex;
+	flex-direction: column;
+	gap: 0.18rem;
 	min-width: 0;
 	flex: 1 1 auto;
-}
-
-.twofa-entry-card__title-row {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	width: 100%;
-	min-width: 0;
 }
 
 .twofa-entry-card__title {
-	flex: 1 1 auto;
 	min-width: 0;
-	font-size: 1rem;
-	font-weight: 700;
+	font-size: 0.98rem;
+	font-weight: 650;
 	line-height: 1.3;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -186,99 +447,32 @@
 }
 
 .twofa-entry-card__subtitle {
-	margin-top: 0.2rem;
 	color: var(--text-muted);
-	font-size: 0.9rem;
+	font-size: 0.85rem;
+	line-height: 1.35;
 	word-break: break-word;
 }
 
-.twofa-entry-card__selection-controls {
-	display: flex;
-	align-items: center;
-	gap: 0.45rem;
-	position: absolute;
-	top: 1rem;
-	right: 1rem;
-	z-index: 1;
-}
-
-.twofa-entry-card__selection-indicator {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 1.55rem;
-	height: 1.55rem;
-	border: 1px solid color-mix(
-		in srgb,
-		var(--interactive-accent) 40%,
-		var(--background-modifier-border) 60%
-	);
-	border-radius: 999px;
-	background: color-mix(
-		in srgb,
-		var(--background-secondary) 82%,
-		var(--interactive-accent) 18%
-	);
-	color: var(--interactive-accent);
-	font-size: 0.8rem;
-	font-weight: 700;
-}
-
-.twofa-entry-card__drag-handle {
-	padding: 0.1rem 0.3rem;
-	border-radius: 0.65rem;
-	background: color-mix(in srgb, var(--background-secondary) 84%, transparent);
-	color: var(--text-muted);
-	font-size: 1rem;
-	letter-spacing: -0.1em;
-	line-height: 1.2;
-	user-select: none;
+.twofa-entry-card__code-section {
+	margin-top: 0.9rem;
 }
 
 .twofa-entry-card__code-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.9rem;
-}
-
-.twofa-entry-card__code-group {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 0.65rem;
-	min-width: 0;
+	gap: 1rem;
 }
 
 .twofa-entry-card__code {
 	display: inline-flex;
 	align-items: center;
-	font-size: 1.55rem;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	line-height: 1.1;
-	min-height: 1.15em;
+	min-height: 1.12em;
+	font-size: 1.7rem;
+	font-weight: 720;
+	letter-spacing: 0.16em;
+	line-height: 1.05;
 	white-space: nowrap;
-	font-variant-numeric: tabular-nums;
-}
-
-.twofa-entry-card__next-code-pill {
-	padding: 0.32rem 0.58rem;
-	border: 1px solid color-mix(
-		in srgb,
-		var(--background-modifier-border) 68%,
-		var(--interactive-accent) 32%
-	);
-	border-radius: 999px;
-	background: color-mix(
-		in srgb,
-		var(--background-secondary) 76%,
-		var(--interactive-accent) 24%
-	);
-	color: var(--text-muted);
-	font-size: 0.95rem;
-	font-weight: 600;
-	letter-spacing: 0.08em;
 	font-variant-numeric: tabular-nums;
 }
 
@@ -288,62 +482,85 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 3.2rem;
-	height: 3.2rem;
+	width: 2.65rem;
+	height: 2.65rem;
 	border-radius: 50%;
 	flex-shrink: 0;
 	background: conic-gradient(
-		color-mix(in srgb, var(--interactive-accent) 75%, var(--text-success) 25%)
+		color-mix(in srgb, var(--interactive-accent) 72%, var(--text-success) 28%)
 			var(--countdown-progress),
-		color-mix(in srgb, var(--background-modifier-border) 70%, transparent) 0
+		color-mix(in srgb, var(--background-modifier-border) 72%, transparent) 0
 	);
 }
 
 .twofa-entry-card__countdown-badge::before {
 	content: "";
 	position: absolute;
-	inset: 0.28rem;
+	inset: 0.24rem;
 	border-radius: inherit;
-	background: linear-gradient(
-		180deg,
-		color-mix(in srgb, var(--background-primary) 94%, var(--background-primary-alt) 6%),
-		var(--background-primary)
+	background: color-mix(
+		in srgb,
+		var(--background-primary) 96%,
+		var(--background-primary-alt) 4%
 	);
 	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 65%, transparent);
 }
 
 .twofa-entry-card__countdown-badge.is-warning {
 	background: conic-gradient(
-		color-mix(in srgb, var(--text-warning) 78%, var(--interactive-accent) 22%)
+		color-mix(in srgb, var(--text-warning) 72%, var(--interactive-accent) 28%)
 			var(--countdown-progress),
-		color-mix(in srgb, var(--background-modifier-border) 70%, transparent) 0
+		color-mix(in srgb, var(--background-modifier-border) 72%, transparent) 0
 	);
 }
 
 .twofa-entry-card__countdown-badge.is-error {
 	background: conic-gradient(
-		color-mix(in srgb, var(--text-error) 78%, var(--interactive-accent) 22%) 100%,
-		color-mix(in srgb, var(--text-error) 78%, var(--interactive-accent) 22%) 0
+		color-mix(in srgb, var(--text-error) 80%, var(--interactive-accent) 20%) 100%,
+		color-mix(in srgb, var(--text-error) 80%, var(--interactive-accent) 20%) 0
 	);
 }
 
 .twofa-entry-card__countdown {
 	position: relative;
 	z-index: 1;
-	font-size: 1rem;
+	font-size: 0.9rem;
 	font-weight: 700;
 	line-height: 1;
+	font-variant-numeric: tabular-nums;
 }
 
-.twofa-entry-card.is-selection-mode .twofa-entry-card__title-block {
-	padding-right: 4.6rem;
+.twofa-entry-card__supporting-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 0.75rem;
+	margin-top: 0.78rem;
+	padding-top: 0.72rem;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+}
+
+.twofa-entry-card__supporting-label {
+	color: var(--text-faint);
+	font-size: 0.76rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.twofa-entry-card__next-code {
+	color: var(--text-muted);
+	font-size: 0.94rem;
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	font-variant-numeric: tabular-nums;
 }
 
 .twofa-code-transition {
 	position: relative;
 	display: inline-grid;
 	align-items: center;
-	block-size: 1.15em;
+	block-size: 1.12em;
 	overflow: hidden;
 	pointer-events: none;
 }
@@ -371,18 +588,41 @@
 	animation: twofa-code-fade-in 140ms ease forwards;
 }
 
-.twofa-empty-state {
+.twofa-state-panel {
 	display: flex;
 	flex-direction: column;
+	justify-content: center;
 	gap: 0.85rem;
+	min-height: 11rem;
 	padding: 1rem;
 	border: 1px dashed var(--background-modifier-border);
-	border-radius: 1rem;
-	background: var(--background-primary-alt);
+	border-radius: 1.125rem;
+	background: color-mix(
+		in srgb,
+		var(--background-primary-alt) 92%,
+		var(--background-primary) 8%
+	);
+	transition:
+		border-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		background-color var(--twofa-motion-state) var(--twofa-ease-standard),
+		opacity var(--twofa-motion-state) var(--twofa-ease-standard);
 }
 
-.twofa-empty-state--compact {
-	padding: 0.9rem;
+.twofa-state-panel--compact {
+	min-height: 7.5rem;
+}
+
+.twofa-floating-lock-button {
+	position: absolute;
+	right: 1rem;
+	bottom: 1rem;
+	z-index: 2;
+	box-shadow: 0 14px 30px color-mix(in srgb, var(--background-modifier-box-shadow) 22%, transparent);
+}
+
+.twofa-menu-item-danger {
+	color: var(--text-error);
+	font-weight: 650;
 }
 
 .twofa-modal-actions .setting-item-control {
@@ -658,20 +898,38 @@
 }
 
 @media (max-width: 700px) {
-	.twofa-summary-bar,
+	.twofa-command-dock__row,
+	.twofa-command-dock__actions,
 	.twofa-entry-card__header,
 	.twofa-entry-card__code-row,
+	.twofa-entry-card__supporting-row,
 	.twofa-bulk-import-item__header {
 		flex-direction: column;
 		align-items: flex-start;
 	}
+	.twofa-action-pill__label {
+		max-width: 10rem;
+		opacity: 1;
+	}
+}
 
-	.twofa-entry-card__selection-controls {
-		position: static;
-		margin-bottom: 0.75rem;
+@media (prefers-reduced-motion: reduce) {
+	.twofa-command-dock,
+	.twofa-action-pill,
+	.twofa-action-pill__label,
+	.twofa-search-shell,
+	.twofa-entry-card,
+	.twofa-state-panel,
+	.twofa-import-surface {
+		transition-duration: 0.01ms !important;
 	}
 
-	.twofa-entry-card.is-selection-mode .twofa-entry-card__title-block {
-		padding-right: 0;
+	.twofa-entry-card:hover,
+	.twofa-entry-card:active,
+	.twofa-entry-card.is-dragging,
+	.twofa-import-surface:hover,
+	.twofa-import-surface:focus-visible,
+	.twofa-import-surface.is-active {
+		transform: none;
 	}
 }

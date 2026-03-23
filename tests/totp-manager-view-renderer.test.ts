@@ -32,23 +32,17 @@ function createActionsLog() {
 		onBulkImport: () => {
 			events.push("bulk-import");
 		},
+		onOpenAddMenu: () => {
+			events.push("open-add-menu");
+		},
 		onCardClick: (entry) => {
 			events.push(`card-click:${entry.id}`);
 		},
 		onCardContextMenu: (entry) => {
 			events.push(`card-menu:${entry.id}`);
 		},
-		onCardDragEnd: () => {
-			events.push("drag-end");
-		},
-		onCardDragOver: (entry) => {
-			events.push(`drag-over:${entry.id}`);
-		},
-		onCardDragStart: (entry) => {
-			events.push(`drag-start:${entry.id}`);
-		},
-		onCardDrop: (entry) => {
-			events.push(`drag-drop:${entry.id}`);
+		onCardDragHandlePointerDown: (entry) => {
+			events.push(`handle-pointer-down:${entry.id}`);
 		},
 		onCardKeyDown: (entry) => {
 			events.push(`card-keydown:${entry.id}`);
@@ -56,11 +50,17 @@ function createActionsLog() {
 		onCardPointerDown: (entry) => {
 			events.push(`pointer-down:${entry.id}`);
 		},
-		onCardPointerEnd: () => {
-			events.push("pointer-end");
+		onCardPointerEnd: (entry) => {
+			events.push(`pointer-end:${entry.id}`);
 		},
-		onCardPointerMove: () => {
-			events.push("pointer-move");
+		onCardPointerLeave: () => {
+			events.push("pointer-leave");
+		},
+		onCardPointerCancel: () => {
+			events.push("pointer-cancel");
+		},
+		onCardPointerMove: (entry) => {
+			events.push(`pointer-move:${entry.id}`);
 		},
 		onCreateVault: () => {
 			events.push("create-vault");
@@ -148,6 +148,7 @@ function createRendererHarness() {
 		actions,
 		{
 			entryCardRenderer,
+			setUiIcon: () => {},
 		},
 	);
 
@@ -163,6 +164,27 @@ function createRendererHarness() {
 	};
 }
 
+function collectElements(
+	root: FakeElement,
+	predicate: (element: FakeElement) => boolean,
+): FakeElement[] {
+	return [
+		...(predicate(root) ? [root] : []),
+		...root.children.flatMap((child) => collectElements(child, predicate)),
+	];
+}
+
+function findActionPill(root: FakeElement, label: string): FakeElement | null {
+	return (
+		collectElements(
+			root,
+			(element) =>
+				element.hasClass("twofa-action-pill") &&
+				element.getAttribute("aria-label") === label,
+		)[0] ?? null
+	);
+}
+
 test("TotpManagerViewRenderer resets unavailable state and renders create/unlock shells", () => {
 	const harness = createRendererHarness();
 	harness.state.syncEntries(harness.entries);
@@ -173,17 +195,21 @@ test("TotpManagerViewRenderer resets unavailable state and renders create/unlock
 		entries: harness.entries,
 		isUnlocked: false,
 		isVaultInitialized: true,
+		showFloatingLockButton: true,
 		showUpcomingCodes: false,
 	});
 
 	assert.equal(harness.state.isSelectionMode(), false);
 	assert.equal(harness.state.getDragState(), null);
+	assert.ok(harness.root.findByClass("twofa-command-dock"));
+	assert.ok(harness.root.findByClass("twofa-search-input"));
 	assert.ok(harness.root.findByText("common.unlockVault"));
 
 	harness.renderer.render(harness.root as unknown as HTMLElement, {
 		entries: harness.entries,
 		isUnlocked: false,
 		isVaultInitialized: false,
+		showFloatingLockButton: true,
 		showUpcomingCodes: false,
 	});
 
@@ -191,13 +217,14 @@ test("TotpManagerViewRenderer resets unavailable state and renders create/unlock
 	assert.equal(harness.getResetRowsCalls(), 2);
 });
 
-test("TotpManagerViewRenderer forwards search changes and renders summary controls by selection state", () => {
+test("TotpManagerViewRenderer forwards search changes and renders dock controls by selection state", () => {
 	const harness = createRendererHarness();
 
 	harness.renderer.render(harness.root as unknown as HTMLElement, {
 		entries: harness.entries,
 		isUnlocked: true,
 		isVaultInitialized: true,
+		showFloatingLockButton: true,
 		showUpcomingCodes: false,
 	});
 
@@ -209,32 +236,100 @@ test("TotpManagerViewRenderer forwards search changes and renders summary contro
 	});
 	assert.deepEqual(harness.events, ["search:issuer"]);
 	assert.ok(collectTextContent(harness.root).includes('view.summary.other:{"count":2}'));
+	assert.ok(harness.root.findByClass("twofa-floating-lock-button"));
+	assert.equal(harness.root.findByText("view.title"), null);
+	const addButton = findActionPill(harness.root, "common.addEntry");
+	assert.ok(addButton);
+	assert.ok(addButton.hasClass("twofa-action-pill--primary"));
+	assert.ok(addButton.hasClass("twofa-action-pill--compact"));
+	assert.equal(addButton.getAttribute("title"), "common.addEntry");
+	const bulkImportButton = findActionPill(harness.root, "common.bulkImport");
+	assert.ok(bulkImportButton);
+	assert.ok(bulkImportButton.hasClass("twofa-action-pill--secondary"));
+	assert.ok(bulkImportButton.hasClass("twofa-action-pill--compact"));
+	assert.equal(bulkImportButton.getAttribute("title"), "common.bulkImport");
+	const lockButton = findActionPill(harness.root, "common.lock");
+	assert.ok(lockButton);
+	assert.ok(lockButton.hasClass("twofa-floating-lock-button"));
+	assert.equal(lockButton.hasClass("twofa-action-pill--compact"), false);
+	assert.equal(harness.root.findByText("common.addEntry"), null);
+	assert.equal(harness.root.findByText("common.bulkImport"), null);
 
 	harness.state.enterSelectionMode(harness.entries[0].id);
 	harness.renderer.render(harness.root as unknown as HTMLElement, {
 		entries: harness.entries,
 		isUnlocked: true,
 		isVaultInitialized: true,
+		showFloatingLockButton: true,
 		showUpcomingCodes: false,
 	});
 
 	const selectionTexts = collectTextContent(harness.root);
 	assert.ok(selectionTexts.includes('view.manage.selectedCount:{"count":1}'));
-	assert.ok(selectionTexts.includes("common.edit"));
-	assert.ok(selectionTexts.includes("common.deleteSelected"));
-	assert.ok(selectionTexts.includes("common.done"));
+	const selectAllButton = findActionPill(harness.root, "common.selectAll");
+	assert.ok(selectAllButton);
+	assert.ok(selectAllButton.hasClass("twofa-action-pill--secondary"));
+	assert.ok(selectAllButton.hasClass("twofa-action-pill--compact"));
+	const deleteSelectedButton = findActionPill(
+		harness.root,
+		"common.deleteSelected",
+	);
+	assert.ok(deleteSelectedButton);
+	assert.ok(deleteSelectedButton.hasClass("twofa-action-pill--danger"));
+	assert.ok(deleteSelectedButton.hasClass("twofa-action-pill--compact"));
+	assert.equal(deleteSelectedButton.disabled, false);
+	const cancelButton = findActionPill(harness.root, "common.cancel");
+	assert.ok(cancelButton);
+	assert.ok(cancelButton.hasClass("twofa-action-pill--compact"));
+	assert.equal(selectionTexts.includes("common.edit"), false);
+	assert.ok(harness.root.findByClass("twofa-search-input"));
+	assert.equal(harness.root.findByText("common.selectAll"), null);
+	assert.equal(harness.root.findByText("common.deleteSelected"), null);
+	assert.equal(harness.root.findByText("common.cancel"), null);
 
 	harness.state.toggleEntrySelection(harness.entries[1].id);
 	harness.renderer.render(harness.root as unknown as HTMLElement, {
 		entries: harness.entries,
 		isUnlocked: true,
 		isVaultInitialized: true,
+		showFloatingLockButton: true,
 		showUpcomingCodes: false,
 	});
 
 	const multiSelectionTexts = collectTextContent(harness.root);
 	assert.ok(multiSelectionTexts.includes('view.manage.selectedCount:{"count":2}'));
+	const clearSelectionButton = findActionPill(
+		harness.root,
+		"common.clearVisibleSelection",
+	);
+	assert.ok(clearSelectionButton);
+	assert.ok(clearSelectionButton.hasClass("twofa-action-pill--compact"));
 	assert.equal(multiSelectionTexts.includes("common.edit"), false);
+});
+
+test("TotpManagerViewRenderer still renders entries when the floating lock button is hidden", () => {
+	const harness = createRendererHarness();
+
+	harness.renderer.render(harness.root as unknown as HTMLElement, {
+		entries: harness.entries,
+		isUnlocked: true,
+		isVaultInitialized: true,
+		showFloatingLockButton: false,
+		showUpcomingCodes: false,
+	});
+
+	assert.ok(harness.root.findByClass("twofa-command-dock"));
+	assert.ok(harness.root.findByClass("twofa-search-input"));
+	assert.ok(harness.root.findByClass("twofa-entry-card"));
+	assert.equal(harness.root.findByClass("twofa-floating-lock-button"), null);
+});
+
+test("FakeElement.addClass rejects a whitespace-delimited class token", () => {
+	const element = new FakeElement("div");
+
+	assert.throws(() => {
+		element.addClass("alpha beta");
+	}, /Invalid class token/);
 });
 
 test("TotpManagerViewRenderer renders entry cards with selection semantics and next-code rows", () => {
@@ -245,15 +340,21 @@ test("TotpManagerViewRenderer renders entry cards with selection semantics and n
 		entries: harness.entries,
 		isUnlocked: true,
 		isVaultInitialized: true,
+		showFloatingLockButton: false,
 		showUpcomingCodes: true,
 	});
 
 	const card = harness.root.findByClass("twofa-entry-card");
 	assert.ok(card);
-	assert.equal(card.draggable, true);
+	assert.equal(card.draggable, false);
 	assert.equal(card.getAttribute("role"), "checkbox");
 	assert.equal(card.getAttribute("aria-checked"), "true");
-	assert.ok(card.findByClass("twofa-entry-card__drag-handle"));
+	assert.equal(card.getAttribute("aria-label"), null);
+	assert.ok(card.getAttribute("aria-labelledby"));
+	assert.equal(card.findByClass("twofa-entry-card__drag-handle"), null);
+	assert.equal(card.findByClass("twofa-entry-card__selection-indicator"), null);
+	assert.ok(card.findByClass("twofa-entry-card__supporting-row"));
+	assert.equal(harness.root.findByClass("twofa-floating-lock-button"), null);
 	assert.equal(harness.registeredRows.length, 2);
 	assert.ok(harness.registeredRows.every((row) => row.nextCodeEl !== null));
 	assert.equal(harness.getDragStateCalls(), 1);

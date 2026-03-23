@@ -11,8 +11,9 @@ const fixtureEntry = {
 	period: 30,
 };
 
-test("normalizePluginData defaults showUpcomingCodes to false", () => {
+test("normalizePluginData defaults view toggles when settings are missing", () => {
 	assert.equal(normalizePluginData({}).settings.showUpcomingCodes, false);
+	assert.equal(normalizePluginData({}).settings.showFloatingLockButton, true);
 	assert.equal(
 		normalizePluginData({
 			settings: {
@@ -28,6 +29,22 @@ test("normalizePluginData defaults showUpcomingCodes to false", () => {
 			},
 		}).settings.showUpcomingCodes,
 		false,
+	);
+	assert.equal(
+		normalizePluginData({
+			settings: {
+				showFloatingLockButton: false,
+			},
+		}).settings.showFloatingLockButton,
+		false,
+	);
+	assert.equal(
+		normalizePluginData({
+			settings: {
+				showFloatingLockButton: "no",
+			},
+		}).settings.showFloatingLockButton,
+		true,
 	);
 });
 

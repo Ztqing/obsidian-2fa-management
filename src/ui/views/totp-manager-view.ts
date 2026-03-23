@@ -53,14 +53,14 @@ export class TotpManagerView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		await super.onOpen();
-		this.addAction("plus", this.plugin.t("command.addEntry"), () => {
-			void this.controller.handleAddEntry();
-		});
-		this.addAction("import", this.plugin.t("command.bulkImportOtpauthLinks"), () => {
-			void this.controller.handleBulkImport();
-		});
 		this.addAction("lock", this.plugin.t("command.lockVault"), () => {
 			this.controller.lockVault();
+		});
+		this.registerDomEvent(window, "pointerup", (event) => {
+			void this.controller.handleGlobalPointerEnd(event as PointerEvent);
+		});
+		this.registerDomEvent(window, "pointercancel", (event) => {
+			this.controller.handleGlobalPointerCancel(event as PointerEvent);
 		});
 		this.registerInterval(
 			window.setInterval(() => {
@@ -84,6 +84,7 @@ export class TotpManagerView extends ItemView {
 			entries: this.plugin.getEntries(),
 			isUnlocked: this.plugin.isUnlocked(),
 			isVaultInitialized: this.plugin.isVaultInitialized(),
+			showFloatingLockButton: this.plugin.shouldShowFloatingLockButton(),
 			showUpcomingCodes: this.plugin.shouldShowUpcomingCodes(),
 		});
 		await this.codeRefresh.refreshVisibleCodes(this.plugin, this.state.getVisibleEntries());

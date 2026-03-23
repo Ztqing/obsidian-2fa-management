@@ -108,21 +108,76 @@ test("TotpManagerViewState exposes single and multi-selection helpers", () => {
 	assert.equal(state.isSelectionMode(), false);
 });
 
-test("TotpManagerViewState enters selection mode after a long press", () => {
+test("TotpManagerViewState can select and clear the current visible set", () => {
+	const state = new TotpManagerViewState(new FakeTimerApi());
+
+	state.syncEntries(entries);
+	state.enterSelectionMode("alpha");
+	state.selectAllVisibleEntries();
+
+	assert.equal(state.areAllVisibleEntriesSelected(), true);
+	assert.deepEqual(state.getSelectedVisibleEntryIds(), [
+		"alpha",
+		"bravo",
+		"charlie",
+	]);
+
+	state.clearVisibleEntrySelection();
+
+	assert.equal(state.areAllVisibleEntriesSelected(), false);
+	assert.deepEqual(state.getSelectedVisibleEntryIds(), []);
+	assert.equal(state.isSelectionMode(), true);
+});
+
+test("TotpManagerViewState begins dragging after a long press", () => {
 	const timers = new FakeTimerApi();
 	const state = new TotpManagerViewState(timers);
-	let refreshRequested = false;
+	let dragRequested = false;
 
 	state.handlePointerDown("bravo", createPointerEvent(), () => {
-		refreshRequested = true;
+		dragRequested = true;
+		state.beginDrag("bravo", 1);
 	});
 
 	assert.equal(state.isSelectionMode(), false);
 	timers.runAll();
 
-	assert.equal(refreshRequested, true);
-	assert.equal(state.isSelectionMode(), true);
-	assert.equal(state.getSingleSelectedEntry(entries)?.id, "bravo");
+	assert.equal(dragRequested, true);
+	assert.equal(state.isSelectionMode(), false);
+	assert.deepEqual(state.getDragState(), {
+		movedIds: ["bravo"],
+		overEntryId: null,
+		placement: "before",
+	});
+});
+
+test("TotpManagerViewState can force a long press drag when needed", () => {
+	const timers = new FakeTimerApi();
+	const state = new TotpManagerViewState(timers);
+	let dragRequested = false;
+
+	state.handlePointerDown(
+		"bravo",
+		createPointerEvent({
+			target: {} as EventTarget,
+		}),
+		() => {
+			dragRequested = true;
+			state.beginDrag("bravo", 1);
+		},
+		{
+			force: true,
+		},
+	);
+
+	timers.runAll();
+
+	assert.equal(dragRequested, true);
+	assert.deepEqual(state.getDragState(), {
+		movedIds: ["bravo"],
+		overEntryId: null,
+		placement: "before",
+	});
 });
 
 test("TotpManagerViewState tracks drag state for the selected visible block", () => {
@@ -132,7 +187,8 @@ test("TotpManagerViewState tracks drag state for the selected visible block", ()
 	state.enterSelectionMode("alpha");
 	state.toggleEntrySelection("bravo");
 
-	assert.deepEqual(state.beginDrag("alpha"), ["alpha", "bravo"]);
+	assert.deepEqual(state.beginDrag("alpha", 1), ["alpha", "bravo"]);
+	assert.equal(state.isDraggingPointer(1), true);
 	assert.equal(state.updateDragTarget("charlie", "after"), true);
 	assert.deepEqual(state.getDragState(), {
 		movedIds: ["alpha", "bravo"],
@@ -171,7 +227,7 @@ test("TotpManagerViewState clears interaction state when the vault becomes unava
 
 	state.syncEntries(entries);
 	state.enterSelectionMode("alpha");
-	state.beginDrag("alpha");
+	state.beginDrag("alpha", 1);
 	state.handlePointerDown("alpha", createPointerEvent(), () => {});
 	state.resetForUnavailableVault();
 

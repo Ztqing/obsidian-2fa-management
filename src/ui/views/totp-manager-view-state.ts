@@ -40,10 +40,12 @@ export class TotpManagerViewState {
 	private selectedEntryIds = new Set<string>();
 	private longPressTimer: number | null = null;
 	private longPressPointerId: number | null = null;
+	private longPressEntryId: string | null = null;
 	private longPressStartX = 0;
 	private longPressStartY = 0;
 	private suppressedClickEntryId: string | null = null;
 	private dragState: DragState | null = null;
+	private dragPointerId: number | null = null;
 
 	constructor(private readonly timerApi: TimerApi = createWindowTimerApi()) {}
 
@@ -106,13 +108,29 @@ export class TotpManagerViewState {
 	}
 
 	selectAllVisibleEntries(): void {
-		this.selectedEntryIds = new Set(this.visibleEntries.map((entry) => entry.id));
+		this.selectedEntryIds = new Set([
+			...this.selectedEntryIds,
+			...this.visibleEntries.map((entry) => entry.id),
+		]);
+	}
+
+	clearVisibleEntrySelection(): void {
+		const visibleIds = new Set(this.visibleEntries.map((entry) => entry.id));
+		this.selectedEntryIds = new Set(
+			[...this.selectedEntryIds].filter((entryId) => !visibleIds.has(entryId)),
+		);
+	}
+
+	areAllVisibleEntriesSelected(): boolean {
+		return (
+			this.visibleEntries.length > 0 &&
+			this.visibleEntries.every((entry) => this.selectedEntryIds.has(entry.id))
+		);
 	}
 
 	enterSelectionMode(entryId: string): void {
 		this.isSelectionModeActive = true;
 		this.selectedEntryIds = new Set([entryId]);
-		this.suppressedClickEntryId = entryId;
 		this.clearLongPressState();
 	}
 
@@ -164,52 +182,65 @@ export class TotpManagerViewState {
 	handlePointerDown(
 		entryId: string,
 		event: PointerEvent,
-		onLongPressSelection: () => void,
+		onLongPress: () => void,
+		options: {
+			force?: boolean;
+		} = {},
 	): void {
-		if (this.isSelectionModeActive || !shouldStartCardLongPress(event)) {
+		if (!options.force && !shouldStartCardLongPress(event)) {
 			return;
 		}
 
 		this.clearLongPressState();
 		this.longPressPointerId = event.pointerId;
+		this.longPressEntryId = entryId;
 		this.longPressStartX = event.clientX;
 		this.longPressStartY = event.clientY;
 		this.longPressTimer = this.timerApi.setTimeout(() => {
 			this.longPressTimer = null;
-			this.enterSelectionMode(entryId);
-			onLongPressSelection();
+			this.suppressedClickEntryId = entryId;
+			onLongPress();
 		}, LONG_PRESS_DELAY_MS);
 	}
 
-	handlePointerMove(event: PointerEvent): void {
+	handlePointerMove(event: PointerEvent): string | null {
 		if (this.longPressPointerId !== event.pointerId) {
-			return;
+			return null;
 		}
 
 		const deltaX = event.clientX - this.longPressStartX;
 		const deltaY = event.clientY - this.longPressStartY;
 
 		if (Math.hypot(deltaX, deltaY) > LONG_PRESS_MOVE_THRESHOLD_PX) {
+			const pendingEntryId = this.longPressEntryId;
 			this.clearLongPressState();
+			return pendingEntryId;
 		}
+
+		return null;
 	}
 
-	clearLongPressState(): void {
+	clearLongPressState(pointerId?: number): void {
+		if (
+			typeof pointerId === "number" &&
+			this.longPressPointerId !== null &&
+			this.longPressPointerId !== pointerId
+		) {
+			return;
+		}
+
 		if (this.longPressTimer !== null) {
 			this.timerApi.clearTimeout(this.longPressTimer);
 			this.longPressTimer = null;
 		}
 
 		this.longPressPointerId = null;
+		this.longPressEntryId = null;
 	}
 
-	beginDrag(entryId: string): string[] | null {
+	beginDrag(entryId: string, pointerId?: number): string[] | null {
 		this.clearLongPressState();
-
-		if (!this.isSelectionModeActive) {
-			return null;
-		}
-
+		this.suppressedClickEntryId = entryId;
 		const movedIds = this.selectedEntryIds.has(entryId)
 			? this.getSelectedVisibleEntryIds()
 			: [entryId];
@@ -219,8 +250,13 @@ export class TotpManagerViewState {
 			overEntryId: null,
 			placement: "before",
 		};
+		this.dragPointerId = pointerId ?? null;
 
 		return [...movedIds];
+	}
+
+	isDraggingPointer(pointerId: number): boolean {
+		return this.dragState !== null && this.dragPointerId === pointerId;
 	}
 
 	updateDragTarget(entryId: string, placement: EntryDropPlacement): boolean {
@@ -254,8 +290,17 @@ export class TotpManagerViewState {
 		};
 	}
 
-	clearDragState(): void {
+	clearDragState(pointerId?: number): void {
+		if (
+			typeof pointerId === "number" &&
+			this.dragPointerId !== null &&
+			this.dragPointerId !== pointerId
+		) {
+			return;
+		}
+
 		this.dragState = null;
+		this.dragPointerId = null;
 	}
 
 	private pruneSelectionToExistingEntries(entries: readonly TotpEntryRecord[]): void {

@@ -42,6 +42,17 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
+			.setName(this.plugin.t("settings.showFloatingLockButton.name"))
+			.setDesc(this.plugin.t("settings.showFloatingLockButton.description"))
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.shouldShowFloatingLockButton())
+					.onChange((value) => {
+						void this.plugin.setShowFloatingLockButton(value);
+					});
+			});
+
+		new Setting(containerEl)
 			.setName(this.plugin.t("settings.openView.name"))
 			.setDesc(this.plugin.t("settings.openView.description"))
 			.addButton((button) => {

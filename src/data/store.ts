@@ -83,6 +83,8 @@ export function normalizePluginData(value: unknown): PluginData {
 			settings: {
 				preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
 				showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+				showFloatingLockButton:
+					DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
 			},
 		};
 	}
@@ -98,6 +100,10 @@ export function normalizePluginData(value: unknown): PluginData {
 			showUpcomingCodes: normalizeBoolean(
 				rawSettings.showUpcomingCodes,
 				DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+			),
+			showFloatingLockButton: normalizeBoolean(
+				rawSettings.showFloatingLockButton,
+				DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
 			),
 		},
 	};

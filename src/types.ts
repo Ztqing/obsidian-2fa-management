@@ -14,6 +14,7 @@ export interface EncryptedVaultData {
 export interface PluginSettings {
 	preferredSide: PreferredSide;
 	showUpcomingCodes: boolean;
+	showFloatingLockButton: boolean;
 }
 
 export interface PluginData {

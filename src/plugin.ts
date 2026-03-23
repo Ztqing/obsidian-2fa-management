@@ -107,6 +107,15 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		await this.refreshAllViews();
 	}
 
+	shouldShowFloatingLockButton(): boolean {
+		return this.vaultService.shouldShowFloatingLockButton();
+	}
+
+	async setShowFloatingLockButton(value: boolean): Promise<void> {
+		await this.vaultService.setShowFloatingLockButton(value);
+		await this.refreshAllViews();
+	}
+
 	async open2FAView(): Promise<WorkspaceLeaf> {
 		const leaf = await this.app.workspace.ensureSideLeaf(
 			OBSIDIAN_2FA_VIEW,

@@ -40,7 +40,7 @@ export class FakeElement {
 	): FakeElement {
 		const element = new FakeElement(tagName);
 		if (options.cls) {
-			element.addClass(options.cls);
+			element.addClass(...options.cls.split(/\s+/).filter((className) => className.length > 0));
 		}
 		if (options.placeholder) {
 			element.placeholder = options.placeholder;
@@ -60,11 +60,17 @@ export class FakeElement {
 		return this.createEl("span", options);
 	}
 
-	addClass(value: string): void {
-		for (const className of value.split(/\s+/)) {
-			if (className.length > 0) {
-				this.classList.add(className);
+	addClass(...classes: string[]): void {
+		for (const className of classes) {
+			if (className.length === 0) {
+				continue;
 			}
+
+			if (/\s/.test(className)) {
+				throw new Error(`Invalid class token: ${className}`);
+			}
+
+			this.classList.add(className);
 		}
 	}
 
