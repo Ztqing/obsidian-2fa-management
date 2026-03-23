@@ -3,6 +3,7 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url);
 
 await jiti.import("./base32.test.ts");
+await jiti.import("./bulk-import.test.ts");
 await jiti.import("./crypto.test.ts");
 await jiti.import("./i18n.test.ts");
 await jiti.import("./otpauth.test.ts");

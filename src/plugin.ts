@@ -6,6 +6,7 @@ import {
 	sortTotpEntries,
 } from "./data/store";
 import { USER_ERROR_TRANSLATION_KEYS, createUserError, isTwoFaUserError } from "./errors";
+import { applyBulkOtpauthImportPreview } from "./import/bulk-otpauth";
 import { resolveUiLocale } from "./i18n/language";
 import { type TranslationKey, translateUiString } from "./i18n/translations";
 import { TwoFactorSettingTab } from "./settings";
@@ -19,6 +20,7 @@ import type {
 	UiLocale,
 } from "./types";
 import { createRandomId } from "./utils/id";
+import { openBulkOtpauthImportModal } from "./ui/modals/bulk-otpauth-import-modal";
 import { confirmAction } from "./ui/modals/confirm-modal";
 import { promptForMasterPassword } from "./ui/modals/master-password-modal";
 import { openTotpEntryModal } from "./ui/modals/totp-entry-modal";
@@ -190,18 +192,9 @@ export default class TwoFactorManagementPlugin extends Plugin {
 	async handleAddEntryCommand(): Promise<boolean> {
 		await this.open2FAView();
 
-		if (!this.isVaultInitialized()) {
-			const didInitialize = await this.promptToInitializeVault();
-			if (!didInitialize) {
-				return false;
-			}
-		}
-
-		if (!this.isUnlocked()) {
-			const didUnlock = await this.promptToUnlockVault();
-			if (!didUnlock) {
-				return false;
-			}
+		const isReady = await this.ensureVaultReadyForManagement();
+		if (!isReady) {
+			return false;
 		}
 
 		const draft = await openTotpEntryModal(this);
@@ -214,6 +207,52 @@ export default class TwoFactorManagementPlugin extends Plugin {
 			new Notice(
 				this.t("notice.entryAdded", {
 					accountName: draft.accountName,
+				}),
+			);
+			return true;
+		} catch (error) {
+			this.showErrorNotice(error);
+			return false;
+		}
+	}
+
+	async handleBulkImportOtpauthLinksCommand(): Promise<boolean> {
+		await this.open2FAView();
+
+		const isReady = await this.ensureVaultReadyForManagement();
+		if (!isReady) {
+			return false;
+		}
+
+		const existingEntries = this.requireUnlockedEntries();
+		const modalResult = await openBulkOtpauthImportModal(this, existingEntries);
+		if (!modalResult) {
+			return false;
+		}
+
+		try {
+			const commitResult = applyBulkOtpauthImportPreview(modalResult.preview, {
+				existingEntries,
+				selectedDuplicateLineNumbers: modalResult.selectedDuplicateLineNumbers,
+				createId: () => createRandomId(),
+			});
+
+			if (
+				commitResult.addedEntries.length === 0 &&
+				commitResult.replacedEntries.length === 0
+			) {
+				return false;
+			}
+
+			await this.replaceUnlockedEntries(commitResult.nextEntries);
+			new Notice(
+				this.t("notice.bulkImportComplete", {
+					added: commitResult.addedEntries.length,
+					replaced: commitResult.replacedEntries.length,
+					skipped:
+						commitResult.skippedDuplicateExistingEntries.length +
+						commitResult.skippedDuplicateBatchEntries.length,
+					invalid: commitResult.invalidEntries.length,
 				}),
 			);
 			return true;
@@ -337,6 +376,14 @@ export default class TwoFactorManagementPlugin extends Plugin {
 				void this.handleAddEntryCommand();
 			},
 		});
+
+		this.addCommand({
+			id: "bulk-import-otpauth-links",
+			name: this.t("command.bulkImportOtpauthLinks"),
+			callback: () => {
+				void this.handleBulkImportOtpauthLinksCommand();
+			},
+		});
 	}
 
 	private async loadPluginData(): Promise<void> {
@@ -353,6 +400,24 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		this.pluginData.vault = await encryptVaultEntries([], password);
 		await this.persistPluginData();
 		await this.refreshAllViews();
+	}
+
+	private async ensureVaultReadyForManagement(): Promise<boolean> {
+		if (!this.isVaultInitialized()) {
+			const didInitialize = await this.promptToInitializeVault();
+			if (!didInitialize) {
+				return false;
+			}
+		}
+
+		if (!this.isUnlocked()) {
+			const didUnlock = await this.promptToUnlockVault();
+			if (!didUnlock) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private requireUnlockedEntries(): TotpEntryRecord[] {

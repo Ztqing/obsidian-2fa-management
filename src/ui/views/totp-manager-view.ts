@@ -41,6 +41,9 @@ export class TotpManagerView extends ItemView {
 		this.addAction("plus", this.plugin.t("command.addEntry"), () => {
 			void this.plugin.handleAddEntryCommand();
 		});
+		this.addAction("import", this.plugin.t("command.bulkImportOtpauthLinks"), () => {
+			void this.plugin.handleBulkImportOtpauthLinksCommand();
+		});
 		this.addAction("lock", this.plugin.t("command.lockVault"), () => {
 			this.plugin.lockVault(true);
 		});
@@ -144,6 +147,13 @@ export class TotpManagerView extends ItemView {
 		addButton.addClass("mod-cta");
 		addButton.addEventListener("click", () => {
 			void this.plugin.handleAddEntryCommand();
+		});
+
+		const importButton = actionGroup.createEl("button", {
+			text: this.plugin.t("common.bulkImport"),
+		});
+		importButton.addEventListener("click", () => {
+			void this.plugin.handleBulkImportOtpauthLinksCommand();
 		});
 
 		const lockButton = actionGroup.createEl("button", {

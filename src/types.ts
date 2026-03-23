@@ -37,3 +37,59 @@ export interface TotpCodeSnapshot {
 	code: string;
 	secondsRemaining: number;
 }
+
+export interface BulkOtpauthImportEntryBase {
+	lineNumber: number;
+	rawLine: string;
+	duplicateKey: string;
+	entry: TotpEntryDraft;
+}
+
+export interface BulkOtpauthImportNewEntry extends BulkOtpauthImportEntryBase {
+	kind: "new";
+}
+
+export interface BulkOtpauthImportDuplicateExistingEntry
+	extends BulkOtpauthImportEntryBase {
+	kind: "duplicate-existing";
+	existingEntry: TotpEntryRecord;
+}
+
+export interface BulkOtpauthImportDuplicateBatchEntry
+	extends BulkOtpauthImportEntryBase {
+	kind: "duplicate-batch";
+	firstLineNumber: number;
+}
+
+export interface BulkOtpauthImportInvalidEntry {
+	kind: "invalid";
+	lineNumber: number;
+	rawLine: string;
+	errorMessage: string;
+}
+
+export interface BulkOtpauthImportPreviewStats {
+	newCount: number;
+	duplicateExistingCount: number;
+	duplicateBatchCount: number;
+	invalidCount: number;
+	actionableCount: number;
+}
+
+export interface BulkOtpauthImportPreview {
+	sourceText: string;
+	newEntries: BulkOtpauthImportNewEntry[];
+	duplicateExistingEntries: BulkOtpauthImportDuplicateExistingEntry[];
+	duplicateBatchEntries: BulkOtpauthImportDuplicateBatchEntry[];
+	invalidEntries: BulkOtpauthImportInvalidEntry[];
+	stats: BulkOtpauthImportPreviewStats;
+}
+
+export interface BulkOtpauthImportCommitResult {
+	nextEntries: TotpEntryRecord[];
+	addedEntries: TotpEntryRecord[];
+	replacedEntries: TotpEntryRecord[];
+	skippedDuplicateExistingEntries: BulkOtpauthImportDuplicateExistingEntry[];
+	skippedDuplicateBatchEntries: BulkOtpauthImportDuplicateBatchEntry[];
+	invalidEntries: BulkOtpauthImportInvalidEntry[];
+}
