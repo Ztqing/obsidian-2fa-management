@@ -1,11 +1,33 @@
 import type TwoFactorManagementPlugin from "../plugin";
 
-export function registerPluginCommands(plugin: TwoFactorManagementPlugin): void {
+type GuardedCommandPlugin = TwoFactorManagementPlugin & {
+	showNotice?: (message: string) => void;
+};
+
+export async function executeGuardedPluginCommand(
+	plugin: Pick<GuardedCommandPlugin, "getErrorMessage" | "showNotice">,
+	task: () => Promise<unknown>,
+): Promise<boolean> {
+	try {
+		await task();
+		return true;
+	} catch (error) {
+		const message = plugin.getErrorMessage(error);
+		if (plugin.showNotice) {
+			plugin.showNotice(message);
+		} else {
+			console.error(error);
+		}
+		return false;
+	}
+}
+
+export function registerPluginCommands(plugin: GuardedCommandPlugin): void {
 	plugin.addCommand({
 		id: "open-2fa-view",
 		name: plugin.t("command.openView"),
 		callback: () => {
-			void plugin.open2FAView();
+			void executeGuardedPluginCommand(plugin, () => plugin.open2FAView());
 		},
 	});
 
@@ -13,7 +35,7 @@ export function registerPluginCommands(plugin: TwoFactorManagementPlugin): void 
 		id: "unlock-2fa-vault",
 		name: plugin.t("command.unlockVault"),
 		callback: () => {
-			void plugin.promptToUnlockVault();
+			void executeGuardedPluginCommand(plugin, () => plugin.promptToUnlockVault());
 		},
 	});
 
@@ -29,7 +51,7 @@ export function registerPluginCommands(plugin: TwoFactorManagementPlugin): void 
 		id: "add-totp-entry",
 		name: plugin.t("command.addEntry"),
 		callback: () => {
-			void plugin.handleAddEntryCommand();
+			void executeGuardedPluginCommand(plugin, () => plugin.handleAddEntryCommand());
 		},
 	});
 
@@ -37,7 +59,9 @@ export function registerPluginCommands(plugin: TwoFactorManagementPlugin): void 
 		id: "bulk-import-otpauth-links",
 		name: plugin.t("command.bulkImportOtpauthLinks"),
 		callback: () => {
-			void plugin.handleBulkImportOtpauthLinksCommand();
+			void executeGuardedPluginCommand(plugin, () =>
+				plugin.handleBulkImportOtpauthLinksCommand(),
+			);
 		},
 	});
 }

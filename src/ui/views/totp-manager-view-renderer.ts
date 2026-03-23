@@ -5,16 +5,13 @@ import { TotpManagerEntryCardRenderer } from "./totp-manager-entry-card-renderer
 import type { TotpCodeRefreshController } from "./totp-manager-view-code-refresh";
 import type { TotpManagerViewState } from "./totp-manager-view-state";
 
+export type TotpManagerViewRenderMode = "body" | "full" | "search";
+
 export interface TotpManagerViewRendererActions {
 	onAddEntry: () => void;
 	onBulkImport: () => void;
-	onOpenAddMenu: (target: HTMLElement) => void;
 	onCardClick: (entry: TotpEntryRecord, event: MouseEvent) => void;
 	onCardContextMenu: (entry: TotpEntryRecord, event: MouseEvent) => void;
-	onCardDragHandlePointerDown: (
-		entry: TotpEntryRecord,
-		event: PointerEvent,
-	) => void;
 	onCardKeyDown: (
 		entry: TotpEntryRecord,
 		card: HTMLElement,
@@ -35,7 +32,6 @@ export interface TotpManagerViewRendererActions {
 	) => void;
 	onCreateVault: () => void;
 	onDeleteSelected: () => void;
-	onEditSelected: () => void;
 	onExitSelectionMode: () => void;
 	onLockVault: () => void;
 	onSearchQueryChange: (query: string) => void;
@@ -58,9 +54,23 @@ export interface TotpManagerViewRendererDependencies {
 
 type ViewAvailabilityState = "locked" | "ready" | "uninitialized";
 
+export interface TotpManagerViewRenderResult {
+	shouldRefreshVisibleCodes: boolean;
+}
+
 export class TotpManagerViewRenderer {
 	private readonly entryCardRenderer: TotpManagerEntryCardRenderer;
 	private readonly setUiIcon: (element: HTMLElement, icon: string) => void;
+	private contentEl: HTMLElement | null = null;
+	private dockEl: HTMLElement | null = null;
+	private dockStatusEl: HTMLElement | null = null;
+	private dockActionsEl: HTMLElement | null = null;
+	private bodyEl: HTMLElement | null = null;
+	private searchInputEl: HTMLInputElement | null = null;
+	private floatingLockContainerEl: HTMLElement | null = null;
+	private renderedAvailability: ViewAvailabilityState | null = null;
+	private renderedVisibleEntryIds: string[] = [];
+	private readonly renderedCards = new Map<string, HTMLElement>();
 
 	constructor(
 		private readonly plugin: Pick<TwoFactorManagementPlugin, "t">,
@@ -71,7 +81,7 @@ export class TotpManagerViewRenderer {
 		>,
 		private readonly actions: TotpManagerViewRendererActions,
 		dependencies: TotpManagerViewRendererDependencies = {},
-	) {
+		) {
 		this.entryCardRenderer =
 			dependencies.entryCardRenderer ??
 			new TotpManagerEntryCardRenderer(
@@ -83,10 +93,12 @@ export class TotpManagerViewRenderer {
 		this.setUiIcon = dependencies.setUiIcon ?? setIcon;
 	}
 
-	render(contentEl: HTMLElement, context: TotpManagerViewRenderContext): void {
-		this.codeRefresh.resetRows();
-		contentEl.empty();
-		contentEl.addClass("twofa-view");
+	render(
+		contentEl: HTMLElement,
+		context: TotpManagerViewRenderContext,
+		mode: TotpManagerViewRenderMode = "full",
+	): TotpManagerViewRenderResult {
+		this.ensureLayout(contentEl);
 
 		const availability = this.getAvailabilityState(context);
 		const shouldRenderFloatingLock =
@@ -102,29 +114,31 @@ export class TotpManagerViewRenderer {
 			this.state.syncEntries(context.entries);
 		}
 
-		this.renderCommandDock(contentEl, availability);
+		this.renderCommandDock(availability);
 
-		const body = contentEl.createDiv({
-			cls: "twofa-view__body",
-		});
+		const visibleEntryIds =
+			availability === "ready"
+				? this.state.getVisibleEntries().map((entry) => entry.id)
+				: [];
+		const shouldRebuildBody = this.shouldRebuildBody(mode, availability, visibleEntryIds);
 
-		if (availability === "uninitialized") {
-			this.renderUninitializedState(body);
-			return;
+		if (shouldRebuildBody) {
+			this.codeRefresh.resetRows();
+			this.renderBody(availability, context.showUpcomingCodes);
+		} else {
+			this.syncVisibleCardSelectionState();
 		}
 
-		if (availability === "locked") {
-			this.renderLockedState(body);
-			return;
-		}
+		this.renderFloatingLockContainer(shouldRenderFloatingLock);
+		this.renderedAvailability = availability;
+		this.renderedVisibleEntryIds = visibleEntryIds;
+		this.codeRefresh.syncDragState(availability === "ready" ? this.state.getDragState() : null);
 
-		this.renderUnlockedState(body, context.showUpcomingCodes);
-
-		if (shouldRenderFloatingLock) {
-			this.renderFloatingLockButton(contentEl);
-		}
-
-		this.codeRefresh.syncDragState(this.state.getDragState());
+		return {
+			shouldRefreshVisibleCodes:
+				availability === "ready" &&
+				(mode === "full" || (mode === "search" && shouldRebuildBody)),
+		};
 	}
 
 	private getAvailabilityState(
@@ -141,42 +155,28 @@ export class TotpManagerViewRenderer {
 		return "ready";
 	}
 
-	private renderCommandDock(
-		contentEl: HTMLElement,
-		availability: ViewAvailabilityState,
-	): void {
-		const dock = contentEl.createDiv({
-			cls: "twofa-command-dock",
-		});
-		dock.toggleClass("is-selection-mode", this.state.isSelectionMode());
-		dock.toggleClass("is-unavailable", availability !== "ready");
+	private renderCommandDock(availability: ViewAvailabilityState): void {
+		this.dockEl?.toggleClass("is-selection-mode", this.state.isSelectionMode());
+		this.dockEl?.toggleClass("is-unavailable", availability !== "ready");
+		this.dockStatusEl?.setText(this.getDockStatusText(availability));
+		this.dockActionsEl?.empty();
 
-		const topRow = dock.createDiv({
-			cls: "twofa-command-dock__row twofa-command-dock__row--top",
-		});
-		const titleCluster = topRow.createDiv({
-			cls: "twofa-command-dock__title-cluster",
-		});
-		titleCluster.createDiv({
-			cls: "twofa-command-dock__status",
-			text: this.getDockStatusText(availability),
-		});
-
-		const actions = topRow.createDiv({
-			cls: "twofa-command-dock__actions",
-		});
-
-		if (this.state.isSelectionMode()) {
-			this.renderSelectionActions(actions);
-		} else {
-			this.renderPrimaryActions(actions, availability === "ready");
+		if (!this.dockActionsEl) {
+			return;
 		}
 
-		const bottomRow = dock.createDiv({
-			cls: "twofa-command-dock__row twofa-command-dock__row--bottom",
-		});
-
-		this.renderSearchField(bottomRow, availability === "ready");
+		if (this.state.isSelectionMode()) {
+			this.renderSelectionActions(this.dockActionsEl);
+		} else {
+			this.renderPrimaryActions(this.dockActionsEl, availability === "ready");
+		}
+		if (this.searchInputEl) {
+			this.searchInputEl.disabled = availability !== "ready";
+			const nextQuery = this.state.getSearchQuery();
+			if (this.searchInputEl.value !== nextQuery) {
+				this.searchInputEl.value = nextQuery;
+			}
+		}
 	}
 
 	private getDockStatusText(availability: ViewAvailabilityState): string {
@@ -267,26 +267,28 @@ export class TotpManagerViewRenderer {
 		});
 	}
 
-	private renderSearchField(containerEl: HTMLElement, isInteractive: boolean): void {
-		const searchShell = containerEl.createDiv({
-			cls: "twofa-search-shell",
-		});
-		const iconEl = searchShell.createSpan({
-			cls: "twofa-search-shell__icon",
-		});
-		iconEl.setAttribute("aria-hidden", "true");
-		this.setUiIcon(iconEl, "search");
+	private renderBody(
+		availability: ViewAvailabilityState,
+		showUpcomingCodes: boolean,
+	): void {
+		if (!this.bodyEl) {
+			return;
+		}
 
-		const searchInput = searchShell.createEl("input", {
-			type: "search",
-			placeholder: this.plugin.t("view.search.placeholder"),
-		});
-		searchInput.addClass("twofa-search-input");
-		searchInput.disabled = !isInteractive;
-		searchInput.value = this.state.getSearchQuery();
-		searchInput.addEventListener("input", (event) => {
-			this.actions.onSearchQueryChange((event.target as HTMLInputElement).value);
-		});
+		this.bodyEl.empty();
+		this.renderedCards.clear();
+
+		if (availability === "uninitialized") {
+			this.renderUninitializedState(this.bodyEl);
+			return;
+		}
+
+		if (availability === "locked") {
+			this.renderLockedState(this.bodyEl);
+			return;
+		}
+
+		this.renderUnlockedState(this.bodyEl, showUpcomingCodes);
 	}
 
 	private renderUninitializedState(contentEl: HTMLElement): void {
@@ -357,12 +359,18 @@ export class TotpManagerViewRenderer {
 		});
 
 		for (const entry of visibleEntries) {
-			this.entryCardRenderer.renderEntryCard(list, entry, showUpcomingCodes);
+			const card = this.entryCardRenderer.renderEntryCard(list, entry, showUpcomingCodes);
+			this.renderedCards.set(entry.id, card);
 		}
 	}
 
-	private renderFloatingLockButton(contentEl: HTMLElement): void {
-		this.createActionPillButton(contentEl, {
+	private renderFloatingLockContainer(shouldRenderFloatingLock: boolean): void {
+		this.floatingLockContainerEl?.empty();
+		if (!this.floatingLockContainerEl || !shouldRenderFloatingLock) {
+			return;
+		}
+
+		this.createActionPillButton(this.floatingLockContainerEl, {
 			extraClasses: ["twofa-floating-lock-button"],
 			icon: "lock",
 			isInteractive: true,
@@ -372,6 +380,90 @@ export class TotpManagerViewRenderer {
 			},
 			variant: "secondary",
 		});
+	}
+
+	private ensureLayout(contentEl: HTMLElement): void {
+		if (this.contentEl === contentEl && this.dockEl && this.bodyEl && this.searchInputEl) {
+			return;
+		}
+
+		this.contentEl = contentEl;
+		this.contentEl.empty();
+		this.contentEl.addClass("twofa-view");
+
+		this.dockEl = this.contentEl.createDiv({
+			cls: "twofa-command-dock",
+		});
+		const topRow = this.dockEl.createDiv({
+			cls: "twofa-command-dock__row twofa-command-dock__row--top",
+		});
+		const titleCluster = topRow.createDiv({
+			cls: "twofa-command-dock__title-cluster",
+		});
+		this.dockStatusEl = titleCluster.createDiv({
+			cls: "twofa-command-dock__status",
+		});
+		this.dockActionsEl = topRow.createDiv({
+			cls: "twofa-command-dock__actions",
+		});
+		const bottomRow = this.dockEl.createDiv({
+			cls: "twofa-command-dock__row twofa-command-dock__row--bottom",
+		});
+		const searchShell = bottomRow.createDiv({
+			cls: "twofa-search-shell",
+		});
+		const iconEl = searchShell.createSpan({
+			cls: "twofa-search-shell__icon",
+		});
+		iconEl.setAttribute("aria-hidden", "true");
+		this.setUiIcon(iconEl, "search");
+		this.searchInputEl = searchShell.createEl("input", {
+			type: "search",
+			placeholder: this.plugin.t("view.search.placeholder"),
+		});
+		this.searchInputEl.addClass("twofa-search-input");
+		this.searchInputEl.addEventListener("input", (event) => {
+			this.actions.onSearchQueryChange((event.target as HTMLInputElement).value);
+		});
+		this.bodyEl = this.contentEl.createDiv({
+			cls: "twofa-view__body",
+		});
+		this.floatingLockContainerEl = this.contentEl.createDiv();
+	}
+
+	private shouldRebuildBody(
+		mode: TotpManagerViewRenderMode,
+		availability: ViewAvailabilityState,
+		visibleEntryIds: readonly string[],
+	): boolean {
+		if (this.renderedAvailability !== availability) {
+			return true;
+		}
+
+		if (mode === "full") {
+			return true;
+		}
+
+		if (availability !== "ready") {
+			return true;
+		}
+
+		if (visibleEntryIds.length !== this.renderedVisibleEntryIds.length) {
+			return true;
+		}
+
+		return visibleEntryIds.some((entryId, index) => entryId !== this.renderedVisibleEntryIds[index]);
+	}
+
+	private syncVisibleCardSelectionState(): void {
+		for (const entry of this.state.getVisibleEntries()) {
+			const card = this.renderedCards.get(entry.id);
+			if (!card) {
+				continue;
+			}
+
+			this.entryCardRenderer.syncCardSelectionState(card, entry.id);
+		}
 	}
 
 	private createActionPillButton(

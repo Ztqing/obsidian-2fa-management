@@ -13,7 +13,12 @@ const baseDraft: TotpEntryDraft = {
 	secret: "JBSWY3DPEHPK3PXP",
 };
 
-function createService(initialData: unknown = null) {
+function createService(
+	initialData: unknown = null,
+	options: {
+		onSaveData?: (data: PluginData) => Promise<void>;
+	} = {},
+) {
 	const savedSnapshots: PluginData[] = [];
 	let idCounter = 0;
 
@@ -21,7 +26,9 @@ function createService(initialData: unknown = null) {
 		createId: () => `entry-${++idCounter}`,
 		loadData: async () => initialData,
 		saveData: async (data) => {
-			savedSnapshots.push(structuredClone(data));
+			const snapshot = structuredClone(data);
+			await options.onSaveData?.(snapshot);
+			savedSnapshots.push(snapshot);
 		},
 	});
 
@@ -70,10 +77,15 @@ test("TwoFactorVaultService persists add, update, delete, and reorder operations
 		["entry-1", "entry-2"],
 	);
 
-	await service.updateEntry("entry-1", {
-		...baseDraft,
-		accountName: "updated@example.com",
-	});
+	const revisionBeforeEdit = service.getVaultRevision();
+	await service.updateEntry(
+		"entry-1",
+		{
+			...baseDraft,
+			accountName: "updated@example.com",
+		},
+		revisionBeforeEdit,
+	);
 	entries = service.getEntries();
 	assert.equal(entries[0]?.accountName, "updated@example.com");
 
@@ -133,7 +145,11 @@ test("TwoFactorVaultService commits bulk import results and preserves replacemen
 		},
 	);
 
-	const commitResult = await service.commitBulkImport(preview, [1]);
+	const commitResult = await service.commitBulkImport({
+		expectedVaultRevision: service.getVaultRevision(),
+		preview,
+		selectedDuplicateLineNumbers: [1],
+	});
 	const entries = service.getEntries();
 
 	assert.equal(commitResult.replacedEntries.length, 1);
@@ -142,4 +158,140 @@ test("TwoFactorVaultService commits bulk import results and preserves replacemen
 	assert.equal(entries[0]?.id, "entry-1");
 	assert.equal(entries[0]?.secret, "ABCDEFGHIJKLMNOP");
 	assert.equal(entries[1]?.issuer, "Linear");
+});
+
+test("TwoFactorVaultService keeps unlocked entries unchanged when persistence fails", async () => {
+	let saveAttemptCount = 0;
+	const { savedSnapshots, service } = createService(null, {
+		onSaveData: async () => {
+			saveAttemptCount += 1;
+			if (saveAttemptCount === 2) {
+				throw new Error("disk full");
+			}
+		},
+	});
+
+	await service.load();
+	await service.initializeVault("vault-password");
+	const revisionBeforeFailure = service.getVaultRevision();
+
+	await assert.rejects(async () => {
+		await service.addEntry(baseDraft);
+	});
+
+	assert.equal(service.isUnlocked(), true);
+	assert.equal(service.getVaultRevision(), revisionBeforeFailure);
+	assert.deepEqual(service.getEntries(), []);
+	assert.equal(savedSnapshots.length, 1);
+});
+
+test("TwoFactorVaultService keeps settings unchanged when persistence fails", async () => {
+	const { service } = createService(null, {
+		onSaveData: async () => {
+			throw new Error("settings write failed");
+		},
+	});
+
+	await service.load();
+
+	await assert.rejects(async () => {
+		await service.setPreferredSide("left");
+	});
+
+	assert.equal(service.getPreferredSide(), "right");
+	assert.equal(service.shouldShowUpcomingCodes(), false);
+	assert.equal(service.shouldShowFloatingLockButton(), true);
+});
+
+test("TwoFactorVaultService rejects stale edit submissions", async () => {
+	const { service } = createService();
+
+	await service.load();
+	await service.initializeVault("vault-password");
+	await service.addEntry(baseDraft);
+	const staleRevision = service.getVaultRevision();
+	await service.addEntry({
+		...baseDraft,
+		accountName: "fresh@example.com",
+		issuer: "Linear",
+	});
+
+	await assert.rejects(
+		async () => {
+			await service.updateEntry(
+				"entry-1",
+				{
+					...baseDraft,
+					accountName: "stale@example.com",
+				},
+				staleRevision,
+			);
+		},
+		(error: unknown) =>
+			error instanceof Error &&
+			"code" in error &&
+			error.code === "entry_changed_during_edit",
+	);
+
+	assert.equal(service.getEntries()[0]?.accountName, baseDraft.accountName);
+});
+
+test("TwoFactorVaultService rejects edits for missing entries", async () => {
+	const { service } = createService();
+
+	await service.load();
+	await service.initializeVault("vault-password");
+
+	await assert.rejects(
+		async () => {
+			await service.updateEntry(
+				"entry-404",
+				{
+					...baseDraft,
+					accountName: "missing@example.com",
+				},
+				service.getVaultRevision(),
+			);
+		},
+		(error: unknown) =>
+			error instanceof Error && "code" in error && error.code === "entry_not_found",
+	);
+});
+
+test("TwoFactorVaultService rejects stale bulk import previews", async () => {
+	const { service } = createService();
+
+	await service.load();
+	await service.initializeVault("vault-password");
+	await service.addEntry(baseDraft);
+
+	const preview = createBulkOtpauthImportPreview(
+		"otpauth://totp/Linear:person@example.com?secret=QRSTUVWXYZ234567",
+		{
+			existingEntries: service.getEntries(),
+			formatErrorMessage: (error) =>
+				error instanceof Error ? error.message : String(error),
+		},
+	);
+	const expectedVaultRevision = service.getVaultRevision();
+
+	await service.addEntry({
+		...baseDraft,
+		accountName: "fresh@example.com",
+		issuer: "GitLab",
+	});
+
+	await assert.rejects(
+		async () => {
+			await service.commitBulkImport({
+				expectedVaultRevision,
+				preview,
+				selectedDuplicateLineNumbers: [],
+			});
+		},
+		(error: unknown) =>
+			error instanceof Error &&
+			"code" in error &&
+			error.code === "bulk_import_preview_stale",
+	);
 });

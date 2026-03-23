@@ -28,6 +28,38 @@ function getRandomBytes(length: number): Uint8Array {
 	return bytes;
 }
 
+function decodeEncryptedVaultBytes(encryptedVault: EncryptedVaultData): {
+	cipherText: Uint8Array;
+	iv: Uint8Array;
+	salt: Uint8Array;
+} {
+	try {
+		const salt = base64ToBytes(encryptedVault.saltB64);
+		const iv = base64ToBytes(encryptedVault.ivB64);
+		const cipherText = base64ToBytes(encryptedVault.cipherTextB64);
+
+		if (
+			salt.length !== ENCRYPTION_SALT_BYTES ||
+			iv.length !== ENCRYPTION_IV_BYTES ||
+			cipherText.length < 16
+		) {
+			throw createUserError("vault_data_corrupted");
+		}
+
+		return {
+			cipherText,
+			iv,
+			salt,
+		};
+	} catch (error) {
+		if (isTwoFaUserError(error)) {
+			throw error;
+		}
+
+		throw createUserError("vault_data_corrupted");
+	}
+}
+
 async function deriveEncryptionKey(
 	password: string,
 	salt: Uint8Array,
@@ -86,12 +118,12 @@ export async function decryptVaultEntries(
 	encryptedVault: EncryptedVaultData,
 	password: string,
 ): Promise<TotpEntryRecord[]> {
+	const { salt, iv, cipherText } = decodeEncryptedVaultBytes(encryptedVault);
+	let plaintext: ArrayBuffer;
+
 	try {
-		const salt = base64ToBytes(encryptedVault.saltB64);
-		const iv = base64ToBytes(encryptedVault.ivB64);
-		const cipherText = base64ToBytes(encryptedVault.cipherTextB64);
 		const key = await deriveEncryptionKey(password, salt);
-		const plaintext = await getWebCrypto().subtle.decrypt(
+		plaintext = await getWebCrypto().subtle.decrypt(
 			{
 				name: "AES-GCM",
 				iv,
@@ -99,21 +131,29 @@ export async function decryptVaultEntries(
 			key,
 			cipherText,
 		);
-		const parsed = JSON.parse(textDecoder.decode(plaintext)) as unknown;
-
-		return normalizeStoredEntries(parsed);
 	} catch (error) {
 		if (isTwoFaUserError(error)) {
 			throw error;
 		}
 
-		if (
-			error instanceof Error &&
-			(error.name === "OperationError" || error instanceof SyntaxError)
-		) {
+		if (error instanceof Error && error.name === "OperationError") {
 			throw new InvalidVaultPasswordError();
 		}
 
 		throw error;
 	}
+
+	let parsed: unknown;
+
+	try {
+		parsed = JSON.parse(textDecoder.decode(plaintext));
+	} catch (error) {
+		if (error instanceof SyntaxError) {
+			throw createUserError("stored_vault_payload_invalid");
+		}
+
+		throw error;
+	}
+
+	return normalizeStoredEntries(parsed);
 }

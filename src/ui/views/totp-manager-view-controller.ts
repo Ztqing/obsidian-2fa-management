@@ -18,6 +18,7 @@ import {
 	TotpManagerViewState,
 } from "./totp-manager-view-state";
 import { reorderVisibleEntries } from "./entry-order";
+import type { TotpManagerViewRenderMode } from "./totp-manager-view-renderer";
 
 interface TotpManagerViewMenuItemLike {
 	onClick(callback: () => void): this;
@@ -220,7 +221,7 @@ export class TotpManagerViewController {
 			TotpCodeRefreshController,
 			"syncDragState"
 		>,
-		private readonly requestRefresh: () => Promise<void>,
+		private readonly requestRefresh: (mode?: TotpManagerViewRenderMode) => Promise<void>,
 	) {}
 
 	createRendererActions(): TotpManagerViewRendererActions {
@@ -231,17 +232,11 @@ export class TotpManagerViewController {
 			onBulkImport: () => {
 				void this.handleBulkImport();
 			},
-			onOpenAddMenu: (target) => {
-				this.showAddEntryMenu(target);
-			},
 			onCardClick: (entry, event) => {
 				void this.handleCardClick(entry, event);
 			},
 			onCardContextMenu: (entry, event) => {
 				this.handleCardContextMenu(entry, event);
-			},
-			onCardDragHandlePointerDown: (entry, event) => {
-				this.handleCardDragHandlePointerDown(entry, event);
 			},
 			onCardKeyDown: (entry, card, event) => {
 				void this.handleCardKeyDown(entry, card, event);
@@ -266,9 +261,6 @@ export class TotpManagerViewController {
 			},
 			onDeleteSelected: () => {
 				void this.deleteSelectedEntries();
-			},
-			onEditSelected: () => {
-				void this.editSelectedEntry();
 			},
 			onExitSelectionMode: () => {
 				void this.exitSelectionMode();
@@ -310,7 +302,7 @@ export class TotpManagerViewController {
 
 	async updateSearchQuery(query: string): Promise<void> {
 		this.state.setSearchQuery(query, this.environment.getEntries());
-		await this.requestRefresh();
+		await this.requestRefresh("search");
 	}
 
 	async selectAllVisibleEntries(): Promise<void> {
@@ -320,17 +312,17 @@ export class TotpManagerViewController {
 			this.state.selectAllVisibleEntries();
 		}
 
-		await this.requestRefresh();
+		await this.requestRefresh("body");
 	}
 
 	async exitSelectionMode(): Promise<void> {
 		this.state.exitSelectionMode();
-		await this.requestRefresh();
+		await this.requestRefresh("body");
 	}
 
 	async enterSelectionMode(entryId: string): Promise<void> {
 		this.state.enterSelectionMode(entryId);
-		await this.requestRefresh();
+		await this.requestRefresh("body");
 	}
 
 	handleCardPointerDown(entry: TotpEntryRecord, event: PointerEvent): void {
@@ -341,30 +333,6 @@ export class TotpManagerViewController {
 
 			this.codeRefresh.syncDragState(this.state.getDragState());
 		});
-	}
-
-	handleCardDragHandlePointerDown(
-		entry: TotpEntryRecord,
-		event: PointerEvent,
-	): void {
-		if (!this.state.isSelectionMode()) {
-			return;
-		}
-
-		this.state.handlePointerDown(
-			entry.id,
-			event,
-			() => {
-				if (!this.state.beginDrag(entry.id, event.pointerId)) {
-					return;
-				}
-
-				this.codeRefresh.syncDragState(this.state.getDragState());
-			},
-			{
-				force: true,
-			},
-		);
 	}
 
 	async handleCardPointerEnd(
@@ -441,7 +409,7 @@ export class TotpManagerViewController {
 
 		if (this.state.isSelectionMode()) {
 			this.state.toggleEntrySelection(entry.id);
-			await this.requestRefresh();
+			await this.requestRefresh("body");
 			return;
 		}
 
@@ -491,7 +459,7 @@ export class TotpManagerViewController {
 			if (action === "copy") {
 				event.preventDefault();
 				this.state.toggleEntrySelection(entry.id);
-				await this.requestRefresh();
+				await this.requestRefresh("body");
 			}
 			return;
 		}
@@ -524,24 +492,7 @@ export class TotpManagerViewController {
 			selectedEntries,
 			this.environment.getEntries().length,
 		);
-		await this.requestRefresh();
-	}
-
-	async editSelectedEntry(): Promise<void> {
-		const entryToEdit = this.state.getSingleSelectedEntry(
-			this.environment.getEntries(),
-		);
-
-		if (!entryToEdit) {
-			return;
-		}
-
-		const didEdit = await this.environment.promptToEditEntry(entryToEdit);
-
-		if (didEdit) {
-			this.state.exitSelectionMode();
-			await this.requestRefresh();
-		}
+		await this.requestRefresh("full");
 	}
 
 	private async copyEntryCode(entry: TotpEntryRecord): Promise<void> {
@@ -608,27 +559,6 @@ export class TotpManagerViewController {
 		}
 
 		await this.environment.reorderEntriesByIds(nextOrderedIds);
-	}
-
-	private showAddEntryMenu(target: MenuTarget): void {
-		const menu = this.environment.createMenu();
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.addEntry"))
-				.setIcon("plus")
-				.onClick(() => {
-					void this.handleAddEntry();
-				});
-		});
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.bulkImport"))
-				.setIcon("import")
-				.onClick(() => {
-					void this.handleBulkImport();
-				});
-		});
-		this.showMenuAtTarget(menu, target);
 	}
 
 	private showEntryContextMenu(entry: TotpEntryRecord, target: MenuTarget): void {

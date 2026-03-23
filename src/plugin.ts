@@ -37,8 +37,8 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		open2FAView: async () => {
 			await this.open2FAView();
 		},
-		openBulkOtpauthImportModal: async (existingEntries) =>
-			openBulkOtpauthImportModal(this, existingEntries),
+		openBulkOtpauthImportModal: async (existingEntries, expectedVaultRevision) =>
+			openBulkOtpauthImportModal(this, existingEntries, expectedVaultRevision),
 		openTotpEntryModal: async (initialDraft) => openTotpEntryModal(this, initialDraft),
 		promptForMasterPassword: async (options) => promptForMasterPassword(this, options),
 		refreshAllViews: async () => {
@@ -46,7 +46,7 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		},
 		service: this.vaultService,
 		showNotice: (message) => {
-			new Notice(message);
+			this.showNotice(message);
 		},
 		t: (key, variables = {}) => this.t(key, variables),
 	});
@@ -70,6 +70,10 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		return translateUiString(this.getUiLocale(), key, variables);
 	}
 
+	showNotice(message: string): void {
+		new Notice(message);
+	}
+
 	getErrorMessage(error: unknown): string {
 		if (isTwoFaUserError(error)) {
 			return this.t(USER_ERROR_TRANSLATION_KEYS[error.code], error.params);
@@ -88,6 +92,10 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	getEntries(): TotpEntryRecord[] {
 		return this.vaultService.getEntries();
+	}
+
+	getVaultRevision(): number {
+		return this.vaultService.getVaultRevision();
 	}
 
 	getPreferredSide(): PreferredSide {
@@ -179,8 +187,7 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	private async refreshAllViews(): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(OBSIDIAN_2FA_VIEW);
-
-		await Promise.all(
+		await Promise.allSettled(
 			leaves.map(async (leaf) => {
 				if (leaf.view instanceof TotpManagerView) {
 					await leaf.view.refresh();

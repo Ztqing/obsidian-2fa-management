@@ -1,6 +1,7 @@
 import type { TranslationKey } from "./i18n/translations";
 import type {
 	BulkOtpauthImportCommitResult,
+	BulkOtpauthImportSubmission,
 	TotpEntryDraft,
 	TotpEntryRecord,
 	TranslationVariables,
@@ -12,14 +13,12 @@ import type { MasterPasswordPromptOptions } from "./ui/modals/master-password-mo
 export interface TwoFactorVaultServiceLike {
 	addEntry(draft: TotpEntryDraft): Promise<void>;
 	changeMasterPassword(nextPassword: string): Promise<void>;
-	commitBulkImport(
-		preview: BulkOtpauthImportModalResult["preview"],
-		selectedDuplicateLineNumbers: readonly number[],
-	): Promise<BulkOtpauthImportCommitResult>;
+	commitBulkImport(submission: BulkOtpauthImportSubmission): Promise<BulkOtpauthImportCommitResult>;
 	deleteEntries(entryIds: readonly string[]): Promise<void>;
 	deleteEntry(entryId: string): Promise<void>;
 	getEntries(): TotpEntryRecord[];
 	getPreferredSide(): "left" | "right";
+	getVaultRevision(): number;
 	initializeVault(password: string): Promise<void>;
 	isUnlocked(): boolean;
 	isVaultInitialized(): boolean;
@@ -30,7 +29,11 @@ export interface TwoFactorVaultServiceLike {
 	setShowUpcomingCodes(value: boolean): Promise<void>;
 	shouldShowUpcomingCodes(): boolean;
 	unlockVault(password: string): Promise<void>;
-	updateEntry(entryId: string, draft: TotpEntryDraft): Promise<void>;
+	updateEntry(
+		entryId: string,
+		draft: TotpEntryDraft,
+		expectedVaultRevision: number,
+	): Promise<void>;
 }
 
 export interface TwoFactorPluginActionEnvironment {
@@ -39,6 +42,7 @@ export interface TwoFactorPluginActionEnvironment {
 	open2FAView(): Promise<void>;
 	openBulkOtpauthImportModal(
 		existingEntries: readonly TotpEntryRecord[],
+		expectedVaultRevision: number,
 	): Promise<BulkOtpauthImportModalResult | null>;
 	openTotpEntryModal(initialDraft?: Partial<TotpEntryDraft>): Promise<TotpEntryDraft | null>;
 	promptForMasterPassword(options: MasterPasswordPromptOptions): Promise<string | null>;
@@ -183,16 +187,14 @@ export class TwoFactorPluginActions {
 
 		const modalResult = await this.environment.openBulkOtpauthImportModal(
 			this.environment.service.getEntries(),
+			this.environment.service.getVaultRevision(),
 		);
 		if (!modalResult) {
 			return false;
 		}
 
 		try {
-			const commitResult = await this.environment.service.commitBulkImport(
-				modalResult.preview,
-				modalResult.selectedDuplicateLineNumbers,
-			);
+			const commitResult = await this.environment.service.commitBulkImport(modalResult);
 
 			if (
 				commitResult.addedEntries.length === 0 &&
@@ -227,13 +229,18 @@ export class TwoFactorPluginActions {
 			}
 		}
 
+		const expectedVaultRevision = this.environment.service.getVaultRevision();
 		const draft = await this.environment.openTotpEntryModal(entry);
 		if (!draft) {
 			return false;
 		}
 
 		try {
-			await this.environment.service.updateEntry(entry.id, draft);
+			await this.environment.service.updateEntry(
+				entry.id,
+				draft,
+				expectedVaultRevision,
+			);
 			await this.environment.refreshAllViews();
 			this.environment.showNotice(
 				this.environment.t("notice.entryUpdated", {

@@ -5,7 +5,7 @@ import type {
 	BulkOtpauthImportDuplicateExistingEntry,
 	BulkOtpauthImportInvalidEntry,
 	BulkOtpauthImportNewEntry,
-	BulkOtpauthImportPreview,
+	BulkOtpauthImportSubmission,
 	TotpEntryDraft,
 	TotpEntryRecord,
 } from "../../types";
@@ -15,31 +15,32 @@ import {
 	formatBulkImportEntryLabel,
 } from "./bulk-otpauth-import-state";
 
-export interface BulkOtpauthImportModalResult {
-	preview: BulkOtpauthImportPreview;
-	selectedDuplicateLineNumbers: number[];
-}
+export type BulkOtpauthImportModalResult = BulkOtpauthImportSubmission;
 
 class BulkOtpauthImportModal extends Modal {
 	private readonly plugin: TwoFactorManagementPlugin;
 	private readonly existingEntries: readonly TotpEntryRecord[];
+	private readonly expectedVaultRevision: number;
 	private readonly resolve: (result: BulkOtpauthImportModalResult | null) => void;
 	private sourceInput: TextAreaComponent | null = null;
 	private statusEl: HTMLElement | null = null;
 	private resultsEl: HTMLElement | null = null;
 	private importButton: ButtonComponent | null = null;
 	private settled = false;
-	private readonly state = new BulkOtpauthImportModalState();
+	private readonly state: BulkOtpauthImportModalState;
 
 	constructor(
 		plugin: TwoFactorManagementPlugin,
 		existingEntries: readonly TotpEntryRecord[],
+		expectedVaultRevision: number,
 		resolve: (result: BulkOtpauthImportModalResult | null) => void,
 	) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.existingEntries = existingEntries;
+		this.expectedVaultRevision = expectedVaultRevision;
 		this.resolve = resolve;
+		this.state = new BulkOtpauthImportModalState(expectedVaultRevision);
 	}
 
 	onOpen(): void {
@@ -407,8 +408,14 @@ class BulkOtpauthImportModal extends Modal {
 export function openBulkOtpauthImportModal(
 	plugin: TwoFactorManagementPlugin,
 	existingEntries: readonly TotpEntryRecord[],
+	expectedVaultRevision: number,
 ): Promise<BulkOtpauthImportModalResult | null> {
 	return new Promise((resolve) => {
-		new BulkOtpauthImportModal(plugin, existingEntries, resolve).open();
+		new BulkOtpauthImportModal(
+			plugin,
+			existingEntries,
+			expectedVaultRevision,
+			resolve,
+		).open();
 	});
 }

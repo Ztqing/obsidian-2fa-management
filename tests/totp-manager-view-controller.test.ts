@@ -199,6 +199,7 @@ function createControllerHarness(options: {
 	};
 	const codeRefreshLog: Array<ReturnType<TotpManagerViewState["getDragState"]>> = [];
 	let refreshCount = 0;
+	const refreshModes: string[] = [];
 	const controller = new TotpManagerViewController(
 		environment,
 		state,
@@ -207,7 +208,8 @@ function createControllerHarness(options: {
 				codeRefreshLog.push(dragState);
 			},
 		},
-		async () => {
+		async (mode = "full") => {
+			refreshModes.push(mode);
 			refreshCount += 1;
 		},
 	);
@@ -228,6 +230,7 @@ function createControllerHarness(options: {
 		},
 		state,
 		getRefreshCount: () => refreshCount,
+		getRefreshModes: () => [...refreshModes],
 	};
 }
 
@@ -299,6 +302,7 @@ test("TotpManagerViewController toggles selection instead of copying while in se
 	assert.equal(harness.state.isEntrySelected(harness.entries[1].id), true);
 	assert.deepEqual(harness.callLog, []);
 	assert.equal(harness.getRefreshCount(), 1);
+	assert.deepEqual(harness.getRefreshModes(), ["body"]);
 });
 
 test("TotpManagerViewController does not start whole-card drag while in selection mode", () => {
@@ -442,6 +446,7 @@ test("TotpManagerViewController enters selection mode from the context menu", as
 	assert.equal(harness.state.isSelectionMode(), true);
 	assert.equal(harness.state.isEntrySelected(harness.entries[1].id), true);
 	assert.equal(harness.getRefreshCount(), 1);
+	assert.deepEqual(harness.getRefreshModes(), ["body"]);
 });
 
 test("TotpManagerViewController only updates selection after a successful bulk delete", async () => {
@@ -462,29 +467,11 @@ test("TotpManagerViewController only updates selection after a successful bulk d
 	assert.equal(harness.state.getSelectedCount(), 0);
 	assert.equal(harness.state.isSelectionMode(), true);
 	assert.equal(harness.getRefreshCount(), 1);
+	assert.deepEqual(harness.getRefreshModes(), ["full"]);
 	assert.deepEqual(harness.callLog, [
 		"deleteEntries:entry-1,entry-2",
 		"deleteEntries:entry-1,entry-2",
 	]);
-});
-
-test("TotpManagerViewController exits selection mode only after a successful edit", async () => {
-	const harness = createControllerHarness({
-		editResult: false,
-	});
-	harness.state.enterSelectionMode(harness.entries[0].id);
-
-	await harness.controller.editSelectedEntry();
-
-	assert.equal(harness.state.isSelectionMode(), true);
-	assert.equal(harness.getRefreshCount(), 0);
-
-	harness.setEditResult(true);
-	await harness.controller.editSelectedEntry();
-
-	assert.equal(harness.state.isSelectionMode(), false);
-	assert.equal(harness.getRefreshCount(), 1);
-	assert.deepEqual(harness.callLog, ["edit:entry-1", "edit:entry-1"]);
 });
 
 test("TotpManagerViewController skips persistence when a dragged block is released without a new target", async () => {
@@ -572,4 +559,14 @@ test("TotpManagerViewController persists a reordered selection block after point
 		},
 		null,
 	]);
+});
+
+test("TotpManagerViewController requests search refreshes without using a full rerender path", async () => {
+	const harness = createControllerHarness();
+
+	await harness.controller.updateSearchQuery("issuer");
+
+	assert.equal(harness.getRefreshCount(), 1);
+	assert.deepEqual(harness.getRefreshModes(), ["search"]);
+	assert.equal(harness.state.getSearchQuery(), "issuer");
 });

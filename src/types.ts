@@ -19,6 +19,7 @@ export interface PluginSettings {
 
 export interface PluginData {
 	schemaVersion: 1;
+	vaultRevision: number;
 	vault: EncryptedVaultData | null;
 	settings: PluginSettings;
 }
@@ -86,6 +87,12 @@ export interface BulkOtpauthImportPreview {
 	duplicateBatchEntries: BulkOtpauthImportDuplicateBatchEntry[];
 	invalidEntries: BulkOtpauthImportInvalidEntry[];
 	stats: BulkOtpauthImportPreviewStats;
+}
+
+export interface BulkOtpauthImportSubmission {
+	expectedVaultRevision: number;
+	preview: BulkOtpauthImportPreview;
+	selectedDuplicateLineNumbers: number[];
 }
 
 export interface BulkOtpauthImportCommitResult {

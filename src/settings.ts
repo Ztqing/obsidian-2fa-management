@@ -28,7 +28,12 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 				});
 				dropdown.setValue(this.plugin.getPreferredSide());
 				dropdown.onChange((value) => {
-					void this.plugin.setPreferredSide(value === "left" ? "left" : "right");
+					void this.runGuardedTask(
+						() => this.plugin.setPreferredSide(value === "left" ? "left" : "right"),
+						{
+							redisplayOnFailure: true,
+						},
+					);
 				});
 			});
 
@@ -37,7 +42,9 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			.setDesc(this.plugin.t("settings.showUpcomingCodes.description"))
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.shouldShowUpcomingCodes()).onChange((value) => {
-					void this.plugin.setShowUpcomingCodes(value);
+					void this.runGuardedTask(() => this.plugin.setShowUpcomingCodes(value), {
+						redisplayOnFailure: true,
+					});
 				});
 			});
 
@@ -48,7 +55,12 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 				toggle
 					.setValue(this.plugin.shouldShowFloatingLockButton())
 					.onChange((value) => {
-						void this.plugin.setShowFloatingLockButton(value);
+						void this.runGuardedTask(
+							() => this.plugin.setShowFloatingLockButton(value),
+							{
+								redisplayOnFailure: true,
+							},
+						);
 					});
 			});
 
@@ -57,7 +69,7 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			.setDesc(this.plugin.t("settings.openView.description"))
 			.addButton((button) => {
 				button.setButtonText(this.plugin.t("common.openView")).onClick(() => {
-					void this.plugin.open2FAView();
+					void this.runGuardedTask(() => this.plugin.open2FAView());
 				});
 			});
 
@@ -67,7 +79,7 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 				.setDesc(this.plugin.t("settings.createVault.description"))
 				.addButton((button) => {
 					button.setButtonText(this.plugin.t("common.createVault")).setCta().onClick(() => {
-						void this.handleInitializeVault();
+						void this.runGuardedTask(() => this.handleInitializeVault());
 					});
 				});
 			return;
@@ -96,7 +108,7 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 				}
 
 				button.setButtonText(this.plugin.t("common.unlockVault")).setCta().onClick(() => {
-					void this.handleUnlockVault();
+					void this.runGuardedTask(() => this.handleUnlockVault());
 				});
 			});
 
@@ -105,7 +117,7 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			.setDesc(this.plugin.t("settings.changePassword.description"))
 			.addButton((button) => {
 				button.setButtonText(this.plugin.t("common.changePassword")).onClick(() => {
-					void this.handleChangePassword();
+					void this.runGuardedTask(() => this.handleChangePassword());
 				});
 			});
 
@@ -116,9 +128,27 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			.setDesc(this.plugin.t("settings.clearVault.description"))
 			.addButton((button) => {
 				button.setButtonText(this.plugin.t("common.clearVault")).setWarning().onClick(() => {
-					void this.handleResetVault();
+					void this.runGuardedTask(() => this.handleResetVault());
 				});
 			});
+	}
+
+	private async runGuardedTask(
+		task: () => Promise<unknown>,
+		options: {
+			redisplayOnFailure?: boolean;
+		} = {},
+	): Promise<boolean> {
+		try {
+			await task();
+			return true;
+		} catch (error) {
+			new Notice(this.plugin.getErrorMessage(error));
+			if (options.redisplayOnFailure) {
+				this.display();
+			}
+			return false;
+		}
 	}
 
 	private async handleInitializeVault(): Promise<void> {

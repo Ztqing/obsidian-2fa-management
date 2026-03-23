@@ -3,10 +3,13 @@ import type { TranslationVariables } from "./types";
 
 export type TwoFaUserErrorCode =
 	| "account_name_required"
+	| "bulk_import_preview_stale"
 	| "clipboard_unavailable"
 	| "code_generation_failed"
 	| "crypto_unavailable"
 	| "digits_out_of_range"
+	| "entry_changed_during_edit"
+	| "entry_not_found"
 	| "image_pixels_unavailable"
 	| "image_read_failed"
 	| "incorrect_master_password"
@@ -21,6 +24,7 @@ export type TwoFaUserErrorCode =
 	| "stored_vault_payload_invalid"
 	| "unexpected_error"
 	| "unsupported_algorithm"
+	| "vault_data_corrupted"
 	| "vault_unlock_required";
 
 export class TwoFaUserError extends Error {
@@ -44,10 +48,13 @@ export class InvalidVaultPasswordError extends TwoFaUserError {
 
 export const USER_ERROR_TRANSLATION_KEYS: Record<TwoFaUserErrorCode, TranslationKey> = {
 	account_name_required: "error.accountNameRequired",
+	bulk_import_preview_stale: "error.bulkImportPreviewStale",
 	clipboard_unavailable: "error.clipboardUnavailable",
 	code_generation_failed: "error.codeGenerationFailed",
 	crypto_unavailable: "error.cryptoUnavailable",
 	digits_out_of_range: "error.digitsOutOfRange",
+	entry_changed_during_edit: "error.entryChangedDuringEdit",
+	entry_not_found: "error.entryNotFound",
 	image_pixels_unavailable: "error.imagePixelsUnavailable",
 	image_read_failed: "error.imageReadFailed",
 	incorrect_master_password: "error.incorrectMasterPassword",
@@ -62,6 +69,7 @@ export const USER_ERROR_TRANSLATION_KEYS: Record<TwoFaUserErrorCode, Translation
 	stored_vault_payload_invalid: "error.storedVaultPayloadInvalid",
 	unexpected_error: "error.unexpected",
 	unsupported_algorithm: "error.unsupportedAlgorithm",
+	vault_data_corrupted: "error.vaultDataCorrupted",
 	vault_unlock_required: "error.vaultUnlockRequired",
 };
 

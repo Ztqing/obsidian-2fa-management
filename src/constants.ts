@@ -28,6 +28,7 @@ export const SUPPORTED_TOTP_ALGORITHMS: readonly TotpAlgorithm[] = [
 
 export const DEFAULT_PLUGIN_DATA: PluginData = {
 	schemaVersion: PLUGIN_DATA_SCHEMA_VERSION,
+	vaultRevision: 0,
 	vault: null,
 	settings: {
 		preferredSide: "right",

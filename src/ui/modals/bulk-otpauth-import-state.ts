@@ -47,6 +47,8 @@ export type BulkOtpauthImportSubmitState =
 	  };
 
 export class BulkOtpauthImportModalState {
+	constructor(private readonly expectedVaultRevision: number) {}
+
 	private preview: BulkOtpauthImportPreview | null = null;
 	private previewDirty = false;
 	private readonly selectedDuplicateLineNumbers = new Set<number>();
@@ -163,6 +165,7 @@ export class BulkOtpauthImportModalState {
 		return {
 			kind: "ready",
 			result: {
+				expectedVaultRevision: this.expectedVaultRevision,
 				preview: this.preview,
 				selectedDuplicateLineNumbers: [...this.selectedDuplicateLineNumbers].sort(
 					(left, right) => left - right,

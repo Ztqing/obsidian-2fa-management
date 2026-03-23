@@ -78,15 +78,16 @@ function createPointerEvent(overrides: Partial<PointerEvent> = {}): PointerEvent
 	} as PointerEvent;
 }
 
-test("TotpManagerViewState keeps filtered entries in stored order", () => {
+test("TotpManagerViewState keeps filtered entries in caller order", () => {
 	const state = new TotpManagerViewState(new FakeTimerApi());
+	const unsortedEntries = [entries[2], entries[0], entries[1]];
 
-	state.syncEntries(entries);
-	state.setSearchQuery("a", entries);
+	state.syncEntries(unsortedEntries);
+	state.setSearchQuery("a", unsortedEntries);
 
 	assert.deepEqual(
 		state.getVisibleEntries().map((entry) => entry.id),
-		["alpha", "bravo", "charlie"],
+		["charlie", "alpha", "bravo"],
 	);
 });
 

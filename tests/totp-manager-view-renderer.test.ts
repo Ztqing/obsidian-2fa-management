@@ -4,6 +4,7 @@ import { TotpManagerEntryCardRenderer } from "../src/ui/views/totp-manager-entry
 import {
 	TotpManagerViewRenderer,
 	type TotpManagerViewRendererActions,
+	type TotpManagerViewRenderMode,
 } from "../src/ui/views/totp-manager-view-renderer";
 import { TotpManagerViewState } from "../src/ui/views/totp-manager-view-state";
 import type { TotpEntryRecord } from "../src/types";
@@ -32,17 +33,11 @@ function createActionsLog() {
 		onBulkImport: () => {
 			events.push("bulk-import");
 		},
-		onOpenAddMenu: () => {
-			events.push("open-add-menu");
-		},
 		onCardClick: (entry) => {
 			events.push(`card-click:${entry.id}`);
 		},
 		onCardContextMenu: (entry) => {
 			events.push(`card-menu:${entry.id}`);
-		},
-		onCardDragHandlePointerDown: (entry) => {
-			events.push(`handle-pointer-down:${entry.id}`);
 		},
 		onCardKeyDown: (entry) => {
 			events.push(`card-keydown:${entry.id}`);
@@ -67,9 +62,6 @@ function createActionsLog() {
 		},
 		onDeleteSelected: () => {
 			events.push("delete-selected");
-		},
-		onEditSelected: () => {
-			events.push("edit-selected");
 		},
 		onExitSelectionMode: () => {
 			events.push("exit-selection");
@@ -256,13 +248,17 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 	assert.equal(harness.root.findByText("common.bulkImport"), null);
 
 	harness.state.enterSelectionMode(harness.entries[0].id);
-	harness.renderer.render(harness.root as unknown as HTMLElement, {
-		entries: harness.entries,
-		isUnlocked: true,
-		isVaultInitialized: true,
-		showFloatingLockButton: true,
-		showUpcomingCodes: false,
-	});
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		{
+			entries: harness.entries,
+			isUnlocked: true,
+			isVaultInitialized: true,
+			showFloatingLockButton: true,
+			showUpcomingCodes: false,
+		},
+		"body",
+	);
 
 	const selectionTexts = collectTextContent(harness.root);
 	assert.ok(selectionTexts.includes('view.manage.selectedCount:{"count":1}'));
@@ -281,20 +277,23 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 	const cancelButton = findActionPill(harness.root, "common.cancel");
 	assert.ok(cancelButton);
 	assert.ok(cancelButton.hasClass("twofa-action-pill--compact"));
-	assert.equal(selectionTexts.includes("common.edit"), false);
 	assert.ok(harness.root.findByClass("twofa-search-input"));
 	assert.equal(harness.root.findByText("common.selectAll"), null);
 	assert.equal(harness.root.findByText("common.deleteSelected"), null);
 	assert.equal(harness.root.findByText("common.cancel"), null);
 
 	harness.state.toggleEntrySelection(harness.entries[1].id);
-	harness.renderer.render(harness.root as unknown as HTMLElement, {
-		entries: harness.entries,
-		isUnlocked: true,
-		isVaultInitialized: true,
-		showFloatingLockButton: true,
-		showUpcomingCodes: false,
-	});
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		{
+			entries: harness.entries,
+			isUnlocked: true,
+			isVaultInitialized: true,
+			showFloatingLockButton: true,
+			showUpcomingCodes: false,
+		},
+		"body",
+	);
 
 	const multiSelectionTexts = collectTextContent(harness.root);
 	assert.ok(multiSelectionTexts.includes('view.manage.selectedCount:{"count":2}'));
@@ -304,7 +303,54 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 	);
 	assert.ok(clearSelectionButton);
 	assert.ok(clearSelectionButton.hasClass("twofa-action-pill--compact"));
-	assert.equal(multiSelectionTexts.includes("common.edit"), false);
+	assert.equal(harness.getResetRowsCalls(), 1);
+});
+
+test("TotpManagerViewRenderer preserves the search input node across non-destructive refreshes", () => {
+	const harness = createRendererHarness();
+	const context = {
+		entries: harness.entries,
+		isUnlocked: true,
+		isVaultInitialized: true,
+		showFloatingLockButton: true,
+		showUpcomingCodes: false,
+	} satisfies Parameters<TotpManagerViewRenderer["render"]>[1];
+
+	harness.renderer.render(harness.root as unknown as HTMLElement, context);
+
+	const initialSearchInput = harness.root.findByClass("twofa-search-input");
+	assert.ok(initialSearchInput);
+
+	harness.state.setSearchQuery("issuer", harness.entries);
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		context,
+		"search" satisfies TotpManagerViewRenderMode,
+	);
+
+	assert.equal(harness.root.findByClass("twofa-search-input"), initialSearchInput);
+	assert.equal(harness.getResetRowsCalls(), 1);
+
+	harness.state.enterSelectionMode(harness.entries[0].id);
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		context,
+		"body",
+	);
+
+	assert.equal(harness.root.findByClass("twofa-search-input"), initialSearchInput);
+	assert.equal(harness.getResetRowsCalls(), 1);
+
+	harness.state.setSearchQuery("entry-1", harness.entries);
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		context,
+		"search",
+	);
+
+	assert.equal(harness.root.findByClass("twofa-search-input"), initialSearchInput);
+	assert.equal(harness.getResetRowsCalls(), 2);
+	assert.equal(collectElements(harness.root, (element) => element.hasClass("twofa-entry-card")).length, 1);
 });
 
 test("TotpManagerViewRenderer still renders entries when the floating lock button is hidden", () => {
@@ -351,8 +397,6 @@ test("TotpManagerViewRenderer renders entry cards with selection semantics and n
 	assert.equal(card.getAttribute("aria-checked"), "true");
 	assert.equal(card.getAttribute("aria-label"), null);
 	assert.ok(card.getAttribute("aria-labelledby"));
-	assert.equal(card.findByClass("twofa-entry-card__drag-handle"), null);
-	assert.equal(card.findByClass("twofa-entry-card__selection-indicator"), null);
 	assert.ok(card.findByClass("twofa-entry-card__supporting-row"));
 	assert.equal(harness.root.findByClass("twofa-floating-lock-button"), null);
 	assert.equal(harness.registeredRows.length, 2);

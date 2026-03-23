@@ -4,15 +4,15 @@ import {
 	normalizePluginData,
 	normalizeTotpEntryDraft,
 	reindexTotpEntries,
-	sortTotpEntries,
 } from "../data/store";
 import { createUserError } from "../errors";
 import { applyBulkOtpauthImportPreview } from "../import/bulk-otpauth";
 import { decryptVaultEntries, encryptVaultEntries } from "../security/crypto";
 import type {
 	BulkOtpauthImportCommitResult,
-	BulkOtpauthImportPreview,
+	BulkOtpauthImportSubmission,
 	PluginData,
+	PluginSettings,
 	PreferredSide,
 	TotpEntryDraft,
 	TotpEntryRecord,
@@ -28,10 +28,13 @@ export class TwoFactorVaultService {
 	private pluginData: PluginData = DEFAULT_PLUGIN_DATA;
 	private unlockedEntries: TotpEntryRecord[] | null = null;
 	private sessionPassword: string | null = null;
+	private writeQueue: Promise<void> = Promise.resolve();
+	private sessionToken = 0;
 
 	constructor(private readonly dependencies: TwoFactorVaultServiceDependencies) {}
 
 	async load(): Promise<void> {
+		await this.writeQueue;
 		this.pluginData = normalizePluginData(await this.dependencies.loadData());
 		this.clearUnlockedState();
 	}
@@ -48,13 +51,20 @@ export class TwoFactorVaultService {
 		return this.unlockedEntries ? [...this.unlockedEntries] : [];
 	}
 
+	getVaultRevision(): number {
+		return this.pluginData.vaultRevision;
+	}
+
 	getPreferredSide(): PreferredSide {
 		return this.pluginData.settings.preferredSide;
 	}
 
 	async setPreferredSide(side: PreferredSide): Promise<void> {
-		this.pluginData.settings.preferredSide = side;
-		await this.persistPluginData();
+		await this.enqueueWrite(async () => {
+			await this.persistSettings({
+				preferredSide: side,
+			});
+		});
 	}
 
 	shouldShowUpcomingCodes(): boolean {
@@ -62,8 +72,11 @@ export class TwoFactorVaultService {
 	}
 
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
-		this.pluginData.settings.showUpcomingCodes = value;
-		await this.persistPluginData();
+		await this.enqueueWrite(async () => {
+			await this.persistSettings({
+				showUpcomingCodes: value,
+			});
+		});
 	}
 
 	shouldShowFloatingLockButton(): boolean {
@@ -71,24 +84,37 @@ export class TwoFactorVaultService {
 	}
 
 	async setShowFloatingLockButton(value: boolean): Promise<void> {
-		this.pluginData.settings.showFloatingLockButton = value;
-		await this.persistPluginData();
+		await this.enqueueWrite(async () => {
+			await this.persistSettings({
+				showFloatingLockButton: value,
+			});
+		});
 	}
 
 	async initializeVault(password: string): Promise<void> {
-		this.unlockedEntries = [];
-		this.sessionPassword = password;
-		this.pluginData.vault = await encryptVaultEntries([], password);
-		await this.persistPluginData();
+		await this.enqueueWrite(async () => {
+			const nextEntries: TotpEntryRecord[] = [];
+			const nextVault = await encryptVaultEntries(nextEntries, password);
+			const nextPluginData = this.createNextPluginData({
+				bumpVaultRevision: true,
+				vault: nextVault,
+			});
+
+			await this.persistPluginData(nextPluginData);
+			this.pluginData = nextPluginData;
+			this.beginUnlockedSession(nextEntries, password);
+		});
 	}
 
 	async unlockVault(password: string): Promise<void> {
+		await this.writeQueue;
+
 		if (!this.pluginData.vault) {
 			throw createUserError("vault_unlock_required");
 		}
 
-		this.unlockedEntries = await decryptVaultEntries(this.pluginData.vault, password);
-		this.sessionPassword = password;
+		const nextEntries = await decryptVaultEntries(this.pluginData.vault, password);
+		this.beginUnlockedSession(nextEntries, password);
 	}
 
 	lockVault(): void {
@@ -96,104 +122,167 @@ export class TwoFactorVaultService {
 	}
 
 	async changeMasterPassword(nextPassword: string): Promise<void> {
-		await this.reencryptUnlockedEntries(nextPassword);
-		this.sessionPassword = nextPassword;
+		await this.enqueueWrite(async () => {
+			const currentEntries = this.requireUnlockedEntries();
+			const currentSessionToken = this.sessionToken;
+			const nextVault = await encryptVaultEntries(currentEntries, nextPassword);
+			const nextPluginData = this.createNextPluginData({
+				bumpVaultRevision: true,
+				vault: nextVault,
+			});
+
+			await this.persistPluginData(nextPluginData);
+			this.pluginData = nextPluginData;
+			this.syncUnlockedSession(currentEntries, nextPassword, currentSessionToken);
+		});
 	}
 
 	async addEntry(draft: TotpEntryDraft): Promise<void> {
-		const normalizedDraft = normalizeTotpEntryDraft(draft);
-		const existingEntries = sortTotpEntries(this.requireUnlockedEntries());
-		const nextEntries = [
-			...existingEntries,
-			{
-				id: this.dependencies.createId(),
-				sortOrder: getNextTotpSortOrder(existingEntries),
-				...normalizedDraft,
-			},
-		];
-		await this.replaceUnlockedEntries(nextEntries);
+		await this.enqueueWrite(async () => {
+			const normalizedDraft = normalizeTotpEntryDraft(draft);
+			const currentEntries = this.requireUnlockedEntries();
+			const nextEntries = [
+				...currentEntries,
+				{
+					id: this.dependencies.createId(),
+					sortOrder: getNextTotpSortOrder(currentEntries),
+					...normalizedDraft,
+				},
+			];
+			await this.commitUnlockedEntries(nextEntries, {
+				bumpVaultRevision: true,
+			});
+		});
 	}
 
-	async updateEntry(entryId: string, draft: TotpEntryDraft): Promise<void> {
-		const normalizedDraft = normalizeTotpEntryDraft(draft);
-		const nextEntries = this.requireUnlockedEntries().map((entry) => {
-			if (entry.id !== entryId) {
-				return entry;
+	async updateEntry(
+		entryId: string,
+		draft: TotpEntryDraft,
+		expectedVaultRevision: number,
+	): Promise<void> {
+		await this.enqueueWrite(async () => {
+			this.assertVaultRevision(expectedVaultRevision, "entry_changed_during_edit");
+
+			const normalizedDraft = normalizeTotpEntryDraft(draft);
+			const currentEntries = this.requireUnlockedEntries();
+			const existingEntry = currentEntries.find((entry) => entry.id === entryId);
+
+			if (!existingEntry) {
+				throw createUserError("entry_not_found");
 			}
 
-			return {
-				id: entry.id,
-				sortOrder: entry.sortOrder,
-				...normalizedDraft,
-			};
+			const nextEntries = currentEntries.map((entry) => {
+				if (entry.id !== entryId) {
+					return entry;
+				}
+
+				return {
+					id: entry.id,
+					sortOrder: entry.sortOrder,
+					...normalizedDraft,
+				};
+			});
+
+			await this.commitUnlockedEntries(nextEntries, {
+				bumpVaultRevision: true,
+			});
 		});
-		await this.replaceUnlockedEntries(nextEntries);
 	}
 
 	async deleteEntry(entryId: string): Promise<void> {
-		const nextEntries = this.requireUnlockedEntries().filter((entry) => entry.id !== entryId);
-		await this.replaceUnlockedEntries(nextEntries);
+		await this.enqueueWrite(async () => {
+			const nextEntries = this.requireUnlockedEntries().filter((entry) => entry.id !== entryId);
+			await this.commitUnlockedEntries(nextEntries, {
+				bumpVaultRevision: true,
+			});
+		});
 	}
 
 	async deleteEntries(entryIds: readonly string[]): Promise<void> {
-		const idsToDelete = new Set(entryIds);
-		const nextEntries = this.requireUnlockedEntries().filter((entry) => !idsToDelete.has(entry.id));
-		await this.replaceUnlockedEntries(nextEntries);
+		await this.enqueueWrite(async () => {
+			const idsToDelete = new Set(entryIds);
+			const nextEntries = this.requireUnlockedEntries().filter(
+				(entry) => !idsToDelete.has(entry.id),
+			);
+			await this.commitUnlockedEntries(nextEntries, {
+				bumpVaultRevision: true,
+			});
+		});
 	}
 
 	async reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void> {
-		const currentEntries = sortTotpEntries(this.requireUnlockedEntries());
-		const entriesById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
-		const seenIds = new Set<string>();
-		const nextEntries: TotpEntryRecord[] = [];
+		await this.enqueueWrite(async () => {
+			const currentEntries = this.requireUnlockedEntries();
+			const entriesById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
+			const seenIds = new Set<string>();
+			const nextEntries: TotpEntryRecord[] = [];
 
-		for (const entryId of nextOrderedIds) {
-			const entry = entriesById.get(entryId);
+			for (const entryId of nextOrderedIds) {
+				const entry = entriesById.get(entryId);
 
-			if (!entry || seenIds.has(entryId)) {
-				continue;
+				if (!entry || seenIds.has(entryId)) {
+					continue;
+				}
+
+				nextEntries.push(entry);
+				seenIds.add(entryId);
 			}
 
-			nextEntries.push(entry);
-			seenIds.add(entryId);
-		}
+			for (const entry of currentEntries) {
+				if (seenIds.has(entry.id)) {
+					continue;
+				}
 
-		for (const entry of currentEntries) {
-			if (seenIds.has(entry.id)) {
-				continue;
+				nextEntries.push(entry);
 			}
 
-			nextEntries.push(entry);
-		}
-
-		await this.replaceUnlockedEntries(nextEntries);
+			await this.commitUnlockedEntries(nextEntries, {
+				bumpVaultRevision: true,
+			});
+		});
 	}
 
 	async commitBulkImport(
-		preview: BulkOtpauthImportPreview,
-		selectedDuplicateLineNumbers: readonly number[],
+		submission: BulkOtpauthImportSubmission,
 	): Promise<BulkOtpauthImportCommitResult> {
-		const commitResult = applyBulkOtpauthImportPreview(preview, {
-			existingEntries: this.requireUnlockedEntries(),
-			selectedDuplicateLineNumbers: [...selectedDuplicateLineNumbers],
-			createId: () => this.dependencies.createId(),
-		});
+		return this.enqueueWrite(async () => {
+			this.assertVaultRevision(
+				submission.expectedVaultRevision,
+				"bulk_import_preview_stale",
+			);
 
-		if (
-			commitResult.addedEntries.length === 0 &&
-			commitResult.replacedEntries.length === 0
-		) {
+			const commitResult = applyBulkOtpauthImportPreview(submission.preview, {
+				existingEntries: this.requireUnlockedEntries(),
+				selectedDuplicateLineNumbers: [...submission.selectedDuplicateLineNumbers],
+				createId: () => this.dependencies.createId(),
+			});
+
+			if (
+				commitResult.addedEntries.length === 0 &&
+				commitResult.replacedEntries.length === 0
+			) {
+				return commitResult;
+			}
+
+			await this.commitUnlockedEntries(commitResult.nextEntries, {
+				bumpVaultRevision: true,
+			});
 			return commitResult;
-		}
-
-		await this.replaceUnlockedEntries(commitResult.nextEntries);
-		return commitResult;
+		});
 	}
 
 	async resetVault(): Promise<void> {
-		this.pluginData.vault = null;
-		this.clearUnlockedState();
-		await this.persistPluginData();
+		await this.enqueueWrite(async () => {
+			const nextPluginData = this.createNextPluginData({
+				bumpVaultRevision:
+					this.pluginData.vault !== null || (this.unlockedEntries?.length ?? 0) > 0,
+				vault: null,
+			});
+
+			await this.persistPluginData(nextPluginData);
+			this.pluginData = nextPluginData;
+			this.clearUnlockedState();
+		});
 	}
 
 	private requireUnlockedEntries(): TotpEntryRecord[] {
@@ -201,29 +290,110 @@ export class TwoFactorVaultService {
 			throw createUserError("vault_unlock_required");
 		}
 
-		return this.unlockedEntries;
+		return [...this.unlockedEntries];
 	}
 
-	private async replaceUnlockedEntries(entries: TotpEntryRecord[]): Promise<void> {
-		this.unlockedEntries = reindexTotpEntries(entries);
-		await this.reencryptUnlockedEntries(this.sessionPassword);
-	}
-
-	private async reencryptUnlockedEntries(password: string | null): Promise<void> {
-		if (!password) {
+	private requireSessionPassword(): string {
+		if (!this.sessionPassword) {
 			throw createUserError("vault_unlock_required");
 		}
 
-		this.pluginData.vault = await encryptVaultEntries(this.requireUnlockedEntries(), password);
-		await this.persistPluginData();
+		return this.sessionPassword;
+	}
+
+	private assertVaultRevision(
+		expectedVaultRevision: number,
+		errorCode: "bulk_import_preview_stale" | "entry_changed_during_edit",
+	): void {
+		if (expectedVaultRevision !== this.pluginData.vaultRevision) {
+			throw createUserError(errorCode);
+		}
+	}
+
+	private async commitUnlockedEntries(
+		entries: TotpEntryRecord[],
+		options: {
+			bumpVaultRevision: boolean;
+			nextPassword?: string;
+		},
+	): Promise<void> {
+		const nextEntries = reindexTotpEntries(entries);
+		const currentSessionToken = this.sessionToken;
+		const nextPassword = options.nextPassword ?? this.requireSessionPassword();
+		const nextVault = await encryptVaultEntries(nextEntries, nextPassword);
+		const nextPluginData = this.createNextPluginData({
+			bumpVaultRevision: options.bumpVaultRevision,
+			vault: nextVault,
+		});
+
+		await this.persistPluginData(nextPluginData);
+		this.pluginData = nextPluginData;
+		this.syncUnlockedSession(nextEntries, nextPassword, currentSessionToken);
+	}
+
+	private createNextPluginData(options: {
+		bumpVaultRevision?: boolean;
+		settings?: PluginSettings;
+		vault?: PluginData["vault"];
+	}): PluginData {
+		return {
+			...this.pluginData,
+			settings: options.settings ?? this.pluginData.settings,
+			vault:
+				typeof options.vault === "undefined" ? this.pluginData.vault : options.vault,
+			vaultRevision: options.bumpVaultRevision
+				? this.pluginData.vaultRevision + 1
+				: this.pluginData.vaultRevision,
+		};
+	}
+
+	private async persistSettings(nextSettings: Partial<PluginSettings>): Promise<void> {
+		const nextPluginData = this.createNextPluginData({
+			settings: {
+				...this.pluginData.settings,
+				...nextSettings,
+			},
+		});
+
+		await this.persistPluginData(nextPluginData);
+		this.pluginData = nextPluginData;
+	}
+
+	private beginUnlockedSession(entries: TotpEntryRecord[], password: string): void {
+		this.sessionToken += 1;
+		this.unlockedEntries = [...entries];
+		this.sessionPassword = password;
+	}
+
+	private syncUnlockedSession(
+		entries: TotpEntryRecord[],
+		password: string,
+		expectedSessionToken: number,
+	): void {
+		if (this.sessionToken !== expectedSessionToken) {
+			return;
+		}
+
+		this.unlockedEntries = [...entries];
+		this.sessionPassword = password;
 	}
 
 	private clearUnlockedState(): void {
+		this.sessionToken += 1;
 		this.unlockedEntries = null;
 		this.sessionPassword = null;
 	}
 
-	private async persistPluginData(): Promise<void> {
-		await this.dependencies.saveData(this.pluginData);
+	private async persistPluginData(data: PluginData): Promise<void> {
+		await this.dependencies.saveData(data);
+	}
+
+	private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
+		const nextOperation = this.writeQueue.then(operation, operation);
+		this.writeQueue = nextOperation.then(
+			() => undefined,
+			() => undefined,
+		);
+		return nextOperation;
 	}
 }

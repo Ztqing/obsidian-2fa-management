@@ -9,6 +9,7 @@ import {
 import {
 	TotpManagerViewRenderer,
 	type TotpManagerViewRendererActions,
+	type TotpManagerViewRenderMode,
 } from "./totp-manager-view-renderer";
 import { TotpManagerViewState } from "./totp-manager-view-state";
 
@@ -28,7 +29,7 @@ export class TotpManagerView extends ItemView {
 			createTotpManagerViewControllerEnvironment(this.plugin),
 			this.state,
 			this.codeRefresh,
-			() => this.refresh(),
+			(mode) => this.refresh(mode),
 		);
 		this.rendererActions = this.controller.createRendererActions();
 		this.renderer = new TotpManagerViewRenderer(
@@ -57,10 +58,10 @@ export class TotpManagerView extends ItemView {
 			this.controller.lockVault();
 		});
 		this.registerDomEvent(window, "pointerup", (event) => {
-			void this.controller.handleGlobalPointerEnd(event as PointerEvent);
+			void this.controller.handleGlobalPointerEnd(event);
 		});
 		this.registerDomEvent(window, "pointercancel", (event) => {
-			this.controller.handleGlobalPointerCancel(event as PointerEvent);
+			this.controller.handleGlobalPointerCancel(event);
 		});
 		this.registerInterval(
 			window.setInterval(() => {
@@ -79,14 +80,18 @@ export class TotpManagerView extends ItemView {
 		await super.onClose();
 	}
 
-	async refresh(): Promise<void> {
-		this.renderer.render(this.contentEl, {
+	async refresh(mode: TotpManagerViewRenderMode = "full"): Promise<void> {
+		const renderResult = this.renderer.render(this.contentEl, {
 			entries: this.plugin.getEntries(),
 			isUnlocked: this.plugin.isUnlocked(),
 			isVaultInitialized: this.plugin.isVaultInitialized(),
 			showFloatingLockButton: this.plugin.shouldShowFloatingLockButton(),
 			showUpcomingCodes: this.plugin.shouldShowUpcomingCodes(),
-		});
+		}, mode);
+		if (!renderResult.shouldRefreshVisibleCodes) {
+			return;
+		}
+
 		await this.codeRefresh.refreshVisibleCodes(this.plugin, this.state.getVisibleEntries());
 	}
 }

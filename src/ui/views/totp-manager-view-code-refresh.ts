@@ -24,6 +24,18 @@ export interface EntryRowRefs {
 	codeAnimationToken: number;
 }
 
+type CachedEntryDisplay =
+	| {
+			kind: "error";
+			label: string;
+			message: string;
+	  }
+	| {
+			kind: "snapshot";
+			countdownLabel: string;
+			value: TotpDisplaySnapshot;
+	  };
+
 export function renderStaticCode(containerEl: HTMLElement, value: string): void {
 	containerEl.empty();
 	containerEl.setText(value);
@@ -61,6 +73,7 @@ function shouldReduceMotionByPreference(): boolean {
 
 export class TotpCodeRefreshController {
 	private readonly rowRefs = new Map<string, EntryRowRefs>();
+	private readonly cachedDisplays = new Map<string, CachedEntryDisplay>();
 	private refreshRun = 0;
 	private readonly createDisplaySnapshot: (
 		entry: TotpEntryRecord,
@@ -78,6 +91,7 @@ export class TotpCodeRefreshController {
 
 	registerRow(entryId: string, refs: EntryRowRefs): void {
 		this.rowRefs.set(entryId, refs);
+		this.applyCachedDisplay(entryId, refs);
 	}
 
 	resetRows(): void {
@@ -87,6 +101,7 @@ export class TotpCodeRefreshController {
 
 	destroy(): void {
 		this.resetRows();
+		this.cachedDisplays.clear();
 	}
 
 	syncDragState(dragState: DragState | null): void {
@@ -145,57 +160,108 @@ export class TotpCodeRefreshController {
 			}
 
 			if (result.snapshot) {
-				const transitionPlan = getCodeTransitionPlan({
-					nextCurrentCode: result.snapshot.currentCode,
-					previousCurrentCode: refs.previousCurrentCode,
-					reducedMotion: this.shouldReduceMotion(),
-				});
-
-				this.updateCurrentCodeDisplay(
-					refs,
-					result.snapshot.currentCode,
-					transitionPlan.currentAnimationMode,
-				);
-				refs.codeEl.removeClass("is-error");
-				refs.countdownEl.setText(String(result.snapshot.secondsRemaining));
-				refs.countdownBadgeEl.setAttribute(
-					"aria-label",
-					plugin.t("view.entry.countdown", {
+				this.cachedDisplays.set(result.entryId, {
+					kind: "snapshot",
+					countdownLabel: plugin.t("view.entry.countdown", {
 						seconds: result.snapshot.secondsRemaining,
 					}),
-				);
-				refs.countdownBadgeEl.setCssProps({
-					"--countdown-progress": `${result.snapshot.progressPercent.toFixed(2)}%`,
+					value: result.snapshot,
 				});
-				refs.countdownBadgeEl.removeClass("is-error");
-				refs.countdownBadgeEl.toggleClass(
-					"is-warning",
-					result.snapshot.isRefreshingSoon,
-				);
-				if (refs.nextCodeEl) {
-					renderStaticCode(refs.nextCodeEl, result.snapshot.nextCode);
-				}
-				refs.previousCurrentCode = result.snapshot.currentCode;
+				this.applySnapshot(refs, result.snapshot, {
+					animationMode: undefined,
+					countdownLabel: plugin.t("view.entry.countdown", {
+						seconds: result.snapshot.secondsRemaining,
+					}),
+				});
 				continue;
 			}
 
-			this.setCurrentCodeText(refs, plugin.t("view.entry.error"));
-			refs.codeEl.addClass("is-error");
-			refs.countdownEl.setText("!");
-			refs.countdownBadgeEl.setCssProps({
-				"--countdown-progress": "0%",
+			const errorMessage = result.error ?? plugin.t("view.entry.refreshFallback");
+			this.cachedDisplays.set(result.entryId, {
+				kind: "error",
+				label: plugin.t("view.entry.error"),
+				message: errorMessage,
 			});
-			refs.countdownBadgeEl.removeClass("is-warning");
-			refs.countdownBadgeEl.addClass("is-error");
-			refs.countdownBadgeEl.setAttribute(
-				"aria-label",
-				result.error ?? plugin.t("view.entry.refreshFallback"),
-			);
-			if (refs.nextCodeEl) {
-				renderStaticCode(refs.nextCodeEl, "------");
-			}
-			refs.previousCurrentCode = null;
+			this.applyErrorState(refs, {
+				errorLabel: plugin.t("view.entry.error"),
+				errorMessage,
+			});
 		}
+	}
+
+	private applyCachedDisplay(entryId: string, refs: EntryRowRefs): void {
+		const cachedDisplay = this.cachedDisplays.get(entryId);
+		if (!cachedDisplay) {
+			return;
+		}
+
+		if (cachedDisplay.kind === "snapshot") {
+			this.applySnapshot(refs, cachedDisplay.value, {
+				animationMode: "none",
+				countdownLabel: cachedDisplay.countdownLabel,
+			});
+			return;
+		}
+
+		this.applyErrorState(refs, {
+			errorLabel: cachedDisplay.label,
+			errorMessage: cachedDisplay.message,
+		});
+	}
+
+	private applySnapshot(
+		refs: EntryRowRefs,
+		snapshot: TotpDisplaySnapshot,
+		options: {
+			animationMode?: CodeAnimationMode;
+			countdownLabel: string;
+		},
+	): void {
+		const transitionPlan = getCodeTransitionPlan({
+			nextCurrentCode: snapshot.currentCode,
+			previousCurrentCode: refs.previousCurrentCode,
+			reducedMotion: this.shouldReduceMotion(),
+		});
+
+		this.updateCurrentCodeDisplay(
+			refs,
+			snapshot.currentCode,
+			options.animationMode ?? transitionPlan.currentAnimationMode,
+		);
+		refs.codeEl.removeClass("is-error");
+		refs.countdownEl.setText(String(snapshot.secondsRemaining));
+		refs.countdownBadgeEl.setAttribute("aria-label", options.countdownLabel);
+		refs.countdownBadgeEl.setCssProps({
+			"--countdown-progress": `${snapshot.progressPercent.toFixed(2)}%`,
+		});
+		refs.countdownBadgeEl.removeClass("is-error");
+		refs.countdownBadgeEl.toggleClass("is-warning", snapshot.isRefreshingSoon);
+		if (refs.nextCodeEl) {
+			renderStaticCode(refs.nextCodeEl, snapshot.nextCode);
+		}
+		refs.previousCurrentCode = snapshot.currentCode;
+	}
+
+	private applyErrorState(
+		refs: EntryRowRefs,
+		options: {
+			errorLabel: string;
+			errorMessage: string;
+		},
+	): void {
+		this.setCurrentCodeText(refs, options.errorLabel);
+		refs.codeEl.addClass("is-error");
+		refs.countdownEl.setText("!");
+		refs.countdownBadgeEl.setCssProps({
+			"--countdown-progress": "0%",
+		});
+		refs.countdownBadgeEl.removeClass("is-warning");
+		refs.countdownBadgeEl.addClass("is-error");
+		refs.countdownBadgeEl.setAttribute("aria-label", options.errorMessage);
+		if (refs.nextCodeEl) {
+			renderStaticCode(refs.nextCodeEl, "------");
+		}
+		refs.previousCurrentCode = null;
 	}
 
 	private updateCurrentCodeDisplay(

@@ -79,6 +79,7 @@ export function normalizePluginData(value: unknown): PluginData {
 	if (!isRecord(value)) {
 		return {
 			schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+			vaultRevision: DEFAULT_PLUGIN_DATA.vaultRevision,
 			vault: DEFAULT_PLUGIN_DATA.vault,
 			settings: {
 				preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
@@ -94,6 +95,10 @@ export function normalizePluginData(value: unknown): PluginData {
 
 	return {
 		schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+		vaultRevision: normalizeNonNegativeInteger(
+			value.vaultRevision,
+			DEFAULT_PLUGIN_DATA.vaultRevision,
+		),
 		vault,
 		settings: {
 			preferredSide: normalizePreferredSide(rawSettings.preferredSide),
@@ -235,14 +240,13 @@ export function filterTotpEntries(
 	entries: readonly TotpEntryRecord[],
 	query: string,
 ): TotpEntryRecord[] {
-	const orderedEntries = sortTotpEntries(entries);
 	const normalizedQuery = query.trim().toLocaleLowerCase();
 
 	if (normalizedQuery.length === 0) {
-		return orderedEntries;
+		return [...entries];
 	}
 
-	return orderedEntries.filter((entry) => {
+	return entries.filter((entry) => {
 			const haystack = `${entry.issuer} ${entry.accountName}`.toLocaleLowerCase();
 			return haystack.includes(normalizedQuery);
 		});

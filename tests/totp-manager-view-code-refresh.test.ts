@@ -179,3 +179,28 @@ test("TotpCodeRefreshController syncs drag classes for dragging and drop placeme
 		false,
 	);
 });
+
+test("TotpCodeRefreshController reapplies cached row content after rows are recreated", async () => {
+	const entry = createEntry("entry-1");
+	const firstRow = createRowRefs();
+	const secondRow = createRowRefs();
+	const controller = new TotpCodeRefreshController({
+		createDisplaySnapshot: async () =>
+			({
+				currentCode: "123456",
+				isRefreshingSoon: false,
+				nextCode: "654321",
+				progressPercent: 50,
+				secondsRemaining: 15,
+			}) satisfies TotpDisplaySnapshot,
+	});
+
+	controller.registerRow(entry.id, firstRow.refs);
+	await controller.refreshVisibleCodes(createPluginStub(), [entry]);
+	controller.resetRows();
+	controller.registerRow(entry.id, secondRow.refs);
+
+	assert.equal((secondRow.refs.codeEl as unknown as FakeElement).textContent, "123456");
+	assert.equal((secondRow.refs.countdownEl as unknown as FakeElement).textContent, "15");
+	assert.equal((secondRow.refs.nextCodeEl as unknown as FakeElement).textContent, "654321");
+});

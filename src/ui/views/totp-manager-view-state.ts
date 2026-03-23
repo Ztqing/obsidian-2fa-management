@@ -1,4 +1,3 @@
-import { filterTotpEntries } from "../../data/store";
 import { shouldStartCardLongPress } from "./card-interactions";
 import type { TotpEntryRecord } from "../../types";
 import type { EntryDropPlacement } from "./entry-order";
@@ -36,6 +35,7 @@ export function getEntryDropPlacement(
 export class TotpManagerViewState {
 	private searchQuery = "";
 	private visibleEntries: TotpEntryRecord[] = [];
+	private readonly searchTextByEntryId = new Map<string, string>();
 	private isSelectionModeActive = false;
 	private selectedEntryIds = new Set<string>();
 	private longPressTimer: number | null = null;
@@ -59,7 +59,8 @@ export class TotpManagerViewState {
 	}
 
 	syncEntries(entries: readonly TotpEntryRecord[]): void {
-		this.visibleEntries = filterTotpEntries(entries, this.searchQuery);
+		this.syncSearchIndex(entries);
+		this.visibleEntries = this.filterEntries(entries, this.searchQuery);
 		this.pruneSelectionToExistingEntries(entries);
 	}
 
@@ -308,5 +309,42 @@ export class TotpManagerViewState {
 		this.selectedEntryIds = new Set(
 			[...this.selectedEntryIds].filter((entryId) => existingIds.has(entryId)),
 		);
+	}
+
+	private filterEntries(
+		entries: readonly TotpEntryRecord[],
+		query: string,
+	): TotpEntryRecord[] {
+		const normalizedQuery = this.normalizeSearchText(query);
+		if (normalizedQuery.length === 0) {
+			return [...entries];
+		}
+
+		return entries.filter((entry) => {
+			return (this.searchTextByEntryId.get(entry.id) ?? "").includes(normalizedQuery);
+		});
+	}
+
+	private syncSearchIndex(entries: readonly TotpEntryRecord[]): void {
+		const existingIds = new Set<string>();
+
+		for (const entry of entries) {
+			existingIds.add(entry.id);
+			this.searchTextByEntryId.set(entry.id, this.createSearchText(entry));
+		}
+
+		for (const entryId of this.searchTextByEntryId.keys()) {
+			if (!existingIds.has(entryId)) {
+				this.searchTextByEntryId.delete(entryId);
+			}
+		}
+	}
+
+	private createSearchText(entry: Pick<TotpEntryRecord, "accountName" | "issuer">): string {
+		return this.normalizeSearchText(`${entry.issuer} ${entry.accountName}`);
+	}
+
+	private normalizeSearchText(value: string): string {
+		return value.trim().toLocaleLowerCase();
 	}
 }

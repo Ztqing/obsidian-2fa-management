@@ -12,6 +12,16 @@ import type { TotpManagerViewState } from "./totp-manager-view-state";
 
 const CODE_PLACEHOLDER = "------";
 
+function clearAttribute(element: HTMLElement, name: string): void {
+	if (typeof element.removeAttribute === "function") {
+		element.removeAttribute(name);
+		return;
+	}
+
+	const attributes = (element as unknown as { attributes?: Map<string, string> }).attributes;
+	attributes?.delete(name);
+}
+
 export interface TotpManagerEntryCardRendererDependencies {
 	resolveProviderIcon?: (entry: TotpEntryRecord) => string;
 	setProviderIcon?: (element: HTMLElement, icon: string) => void;
@@ -37,19 +47,12 @@ export class TotpManagerEntryCardRenderer {
 		listEl: HTMLElement,
 		entry: TotpEntryRecord,
 		showUpcomingCodes: boolean,
-	): void {
-		const isSelected = this.state.isEntrySelected(entry.id);
-		const isSelectionMode = this.state.isSelectionMode();
+	): HTMLElement {
 		const card = listEl.createDiv({
 			cls: "twofa-entry-card",
 		});
-		card.toggleClass("is-selected", isSelected);
-		card.toggleClass("is-selection-mode", isSelectionMode);
 		card.tabIndex = 0;
-		card.setAttribute("role", isSelectionMode ? "checkbox" : "button");
-		if (isSelectionMode) {
-			card.setAttribute("aria-checked", String(isSelected));
-		}
+		this.syncCardSelectionState(card, entry.id);
 
 		card.addEventListener("pointerdown", (event) => {
 			this.actions.onCardPointerDown(entry, event);
@@ -162,5 +165,21 @@ export class TotpManagerEntryCardRenderer {
 			previousCurrentCode: null,
 		};
 		this.codeRefresh.registerRow(entry.id, refs);
+		return card;
+	}
+
+	syncCardSelectionState(card: HTMLElement, entryId: string): void {
+		const isSelected = this.state.isEntrySelected(entryId);
+		const isSelectionMode = this.state.isSelectionMode();
+
+		card.toggleClass("is-selected", isSelected);
+		card.toggleClass("is-selection-mode", isSelectionMode);
+		card.setAttribute("role", isSelectionMode ? "checkbox" : "button");
+		if (isSelectionMode) {
+			card.setAttribute("aria-checked", String(isSelected));
+			return;
+		}
+
+		clearAttribute(card, "aria-checked");
 	}
 }
