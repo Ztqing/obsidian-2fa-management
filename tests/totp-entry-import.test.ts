@@ -4,6 +4,7 @@ import {
 	extractImageFileFromDataTransfer,
 	extractImageFileFromItems,
 	getChangedDraftFields,
+	getOtpauthImportIntent,
 } from "../src/ui/modals/totp-entry-import";
 import type { TotpEntryDraft } from "../src/types";
 
@@ -53,4 +54,15 @@ test("getChangedDraftFields reports only fields changed by an import", () => {
 	});
 
 	assert.deepEqual(changedFields, ["issuer", "secret"]);
+});
+
+test("getOtpauthImportIntent distinguishes ignore, partial, and import states", () => {
+	assert.equal(getOtpauthImportIntent("plain text"), "ignore");
+	assert.equal(getOtpauthImportIntent(" otpauth://totp/Issuer:user@example.com "), "partial");
+	assert.equal(
+		getOtpauthImportIntent(
+			"otpauth://totp/Issuer:user@example.com?secret=JBSWY3DPEHPK3PXP",
+		),
+		"import",
+	);
 });

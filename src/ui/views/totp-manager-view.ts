@@ -1,8 +1,9 @@
-import { ItemView, Menu, Notice, Setting, WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import { OBSIDIAN_2FA_VIEW } from "../../constants";
 import { filterTotpEntries } from "../../data/store";
 import { createTotpDisplaySnapshot } from "../../totp/display";
 import { createTotpSnapshot } from "../../totp/totp";
+import { resolveProviderIcon } from "../provider-icons";
 import { copyTextToClipboard } from "../../utils/clipboard";
 import type { TotpEntryRecord } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
@@ -12,20 +13,28 @@ import {
 	shouldStartCardLongPress,
 } from "./card-interactions";
 import {
+	getCodeTransitionPlan,
+	type CodeAnimationMode,
+} from "./code-transition";
+import {
 	reorderVisibleEntries,
 	type EntryDropPlacement,
 } from "./entry-order";
 
 const LONG_PRESS_DELAY_MS = 350;
 const LONG_PRESS_MOVE_THRESHOLD_PX = 8;
+const CODE_TRANSITION_SLIDE_DURATION_MS = 190;
+const CODE_TRANSITION_FADE_DURATION_MS = 140;
 
 interface EntryRowRefs {
 	cardEl: HTMLElement;
 	codeEl: HTMLElement;
+	countdownBadgeEl: HTMLElement;
 	countdownEl: HTMLElement;
 	nextCodeEl: HTMLElement | null;
-	nextCountdownEl: HTMLElement | null;
-	progressFillEl: HTMLElement | null;
+	previousCurrentCode: string | null;
+	codeAnimationTimeoutId: number | null;
+	codeAnimationToken: number;
 }
 
 interface DragState {
@@ -89,6 +98,7 @@ export class TotpManagerView extends ItemView {
 	async onClose(): Promise<void> {
 		this.clearLongPressState();
 		this.clearDragState();
+		this.clearCodeTransitions();
 		await super.onClose();
 	}
 
@@ -98,6 +108,7 @@ export class TotpManagerView extends ItemView {
 	}
 
 	private render(): void {
+		this.clearCodeTransitions();
 		this.contentEl.empty();
 		this.contentEl.addClass("twofa-view");
 		this.rowRefs.clear();
@@ -208,22 +219,7 @@ export class TotpManagerView extends ItemView {
 			this.plugin.lockVault(true);
 		});
 
-		const summary = new Setting(this.contentEl)
-			.setName(
-				this.visibleEntries.length === 1
-					? this.plugin.t("view.summary.one", {
-						count: this.visibleEntries.length,
-					})
-					: this.plugin.t("view.summary.other", {
-						count: this.visibleEntries.length,
-					}),
-			)
-			.setDesc(this.plugin.t("view.summary.description"));
-		summary.settingEl.addClass("twofa-summary-row");
-
-		if (this.isSelectionMode) {
-			this.renderSelectionToolbar();
-		}
+		this.renderSummaryBar();
 
 		if (this.visibleEntries.length === 0) {
 			const emptyState = this.contentEl.createDiv({
@@ -252,18 +248,14 @@ export class TotpManagerView extends ItemView {
 			card.draggable = this.isSelectionMode;
 			card.tabIndex = 0;
 			card.setAttribute("role", this.isSelectionMode ? "checkbox" : "button");
-			card.setAttribute("aria-checked", this.isSelectionMode ? String(isSelected) : "false");
+			if (this.isSelectionMode) {
+				card.setAttribute("aria-checked", String(isSelected));
+			}
 			card.setAttribute(
 				"aria-label",
 				this.plugin.t("view.entry.cardAriaLabel", {
 					accountName: entry.accountName,
 				}),
-			);
-			card.setAttribute(
-				"title",
-				this.isSelectionMode
-					? this.plugin.t("view.manage.cardHint")
-					: this.plugin.t("view.entry.cardHint"),
 			);
 			card.addEventListener("pointerdown", (event) => {
 				this.handleCardPointerDown(entry, event);
@@ -310,13 +302,39 @@ export class TotpManagerView extends ItemView {
 				this.clearDragState();
 			});
 
+			if (this.isSelectionMode) {
+				const selectionControls = card.createDiv({
+					cls: "twofa-entry-card__selection-controls",
+				});
+				const manageIndicator = selectionControls.createDiv({
+					cls: "twofa-entry-card__selection-indicator",
+				});
+				manageIndicator.setText(isSelected ? "✓" : "");
+				selectionControls.createDiv({
+					cls: "twofa-entry-card__drag-handle",
+					text: "⋮⋮",
+				});
+			}
+
 			const header = card.createDiv({
 				cls: "twofa-entry-card__header",
 			});
-			const titleBlock = header.createDiv({
+			const identity = header.createDiv({
+				cls: "twofa-entry-card__identity",
+			});
+			const providerIcon = identity.createDiv({
+				cls: "twofa-entry-card__provider-icon",
+			});
+			providerIcon.setAttribute("aria-hidden", "true");
+			setIcon(providerIcon, resolveProviderIcon(entry));
+
+			const titleBlock = identity.createDiv({
 				cls: "twofa-entry-card__title-block",
 			});
-			titleBlock.createEl("div", {
+			const titleRow = titleBlock.createDiv({
+				cls: "twofa-entry-card__title-row",
+			});
+			titleRow.createEl("div", {
 				cls: "twofa-entry-card__title",
 				text: entry.issuer || entry.accountName,
 			});
@@ -327,93 +345,76 @@ export class TotpManagerView extends ItemView {
 				});
 			}
 
-			const headerMeta = header.createDiv({
-				cls: "twofa-entry-card__header-meta",
-			});
-			if (this.isSelectionMode) {
-				const manageIndicator = headerMeta.createDiv({
-					cls: "twofa-entry-card__selection-indicator",
-				});
-				manageIndicator.setText(isSelected ? "✓" : "");
-				headerMeta.createDiv({
-					cls: "twofa-entry-card__drag-handle",
-					text: "⋮⋮",
-				});
-			}
-			const badge = headerMeta.createDiv({
-				cls: "twofa-entry-card__badge",
-			});
-			badge.setText(
-				this.plugin.t("view.entry.badge", {
-					digits: entry.digits,
-					period: entry.period,
-				}),
-			);
-
 			const codeRow = card.createDiv({
 				cls: "twofa-entry-card__code-row",
 			});
-			const codeEl = codeRow.createEl("code", {
+			const codeGroup = codeRow.createDiv({
+				cls: "twofa-entry-card__code-group",
+			});
+			const codeEl = codeGroup.createEl("code", {
 				cls: "twofa-entry-card__code",
-				text: "------",
 			});
-			const statusColumn = codeRow.createDiv({
-				cls: "twofa-entry-card__status",
+			this.renderStaticCode(codeEl, "------");
+			let nextCodeEl: HTMLElement | null = null;
+			if (showUpcomingCodes) {
+				nextCodeEl = codeGroup.createEl("code", {
+					cls: "twofa-entry-card__next-code-pill",
+				});
+				this.renderStaticCode(nextCodeEl, "------");
+			}
+			const countdownBadgeEl = codeRow.createDiv({
+				cls: "twofa-entry-card__countdown-badge",
 			});
-			const countdownEl = statusColumn.createDiv({
+			countdownBadgeEl.setAttribute(
+				"aria-label",
+				this.plugin.t("view.entry.countdown", {
+					seconds: 0,
+				}),
+			);
+			const countdownEl = countdownBadgeEl.createDiv({
 				cls: "twofa-entry-card__countdown",
 				text: "...",
 			});
-			const progressTrack = statusColumn.createDiv({
-				cls: "twofa-entry-card__progress",
-			});
-			const progressFillEl = progressTrack.createDiv({
-				cls: "twofa-entry-card__progress-fill",
-			});
-			let nextCodeEl: HTMLElement | null = null;
-			let nextCountdownEl: HTMLElement | null = null;
-
-			if (showUpcomingCodes) {
-				const nextRow = card.createDiv({
-					cls: "twofa-entry-card__next-row",
-				});
-				nextRow.createDiv({
-					cls: "twofa-entry-card__next-label",
-					text: this.plugin.t("view.entry.nextCode"),
-				});
-				const nextValueBlock = nextRow.createDiv({
-					cls: "twofa-entry-card__next-value-block",
-				});
-				nextCodeEl = nextValueBlock.createEl("code", {
-					cls: "twofa-entry-card__next-code",
-					text: "------",
-				});
-				nextCountdownEl = nextValueBlock.createDiv({
-					cls: "twofa-entry-card__next-countdown",
-					text: "...",
-				});
-			}
 
 			this.rowRefs.set(entry.id, {
 				cardEl: card,
 				codeEl,
+				countdownBadgeEl,
 				countdownEl,
 				nextCodeEl,
-				nextCountdownEl,
-				progressFillEl,
+				previousCurrentCode: null,
+				codeAnimationTimeoutId: null,
+				codeAnimationToken: 0,
 			});
 		}
 
 		this.syncDragStateClasses();
 	}
 
-	private renderSelectionToolbar(): void {
-		const selectedCount = this.selectedEntryIds.size;
-		const toolbar = this.contentEl.createDiv({
-			cls: "twofa-selection-toolbar",
+	private renderSummaryBar(): void {
+		const summaryBar = this.contentEl.createDiv({
+			cls: "twofa-summary-bar",
 		});
-		toolbar.createDiv({
-			cls: "twofa-selection-toolbar__summary",
+
+		if (!this.isSelectionMode) {
+			summaryBar.createDiv({
+				cls: "twofa-summary-bar__summary",
+				text:
+					this.visibleEntries.length === 1
+						? this.plugin.t("view.summary.one", {
+							count: this.visibleEntries.length,
+						})
+						: this.plugin.t("view.summary.other", {
+							count: this.visibleEntries.length,
+						}),
+			});
+			return;
+		}
+
+		summaryBar.addClass("is-selection-mode");
+		const selectedCount = this.selectedEntryIds.size;
+		summaryBar.createDiv({
+			cls: "twofa-summary-bar__summary",
 			text:
 				selectedCount > 0
 					? this.plugin.t("view.manage.selectedCount", {
@@ -421,7 +422,7 @@ export class TotpManagerView extends ItemView {
 					})
 					: this.plugin.t("view.manage.emptySelection"),
 		});
-		const actions = toolbar.createDiv({
+		const actions = summaryBar.createDiv({
 			cls: "twofa-inline-actions",
 		});
 		const selectAllButton = actions.createEl("button", {
@@ -455,11 +456,6 @@ export class TotpManagerView extends ItemView {
 		doneButton.addClass("mod-cta");
 		doneButton.addEventListener("click", () => {
 			this.exitSelectionMode();
-		});
-
-		toolbar.createDiv({
-			cls: "twofa-selection-toolbar__hint",
-			text: this.plugin.t("view.manage.hint"),
 		});
 	}
 
@@ -837,42 +833,152 @@ export class TotpManagerView extends ItemView {
 			}
 
 			if (result.snapshot) {
-				refs.codeEl.setText(result.snapshot.currentCode);
-				refs.countdownEl.setText(
+				const transitionPlan = getCodeTransitionPlan({
+					previousCurrentCode: refs.previousCurrentCode,
+					nextCurrentCode: result.snapshot.currentCode,
+					reducedMotion: this.shouldReduceMotion(),
+				});
+
+				this.updateCurrentCodeDisplay(
+					refs,
+					result.snapshot.currentCode,
+					transitionPlan.currentAnimationMode,
+				);
+				refs.codeEl.removeClass("is-error");
+				refs.countdownEl.setText(String(result.snapshot.secondsRemaining));
+				refs.countdownBadgeEl.setAttribute(
+					"aria-label",
 					this.plugin.t("view.entry.countdown", {
 						seconds: result.snapshot.secondsRemaining,
 					}),
 				);
-				refs.codeEl.removeClass("is-error");
-				if (refs.progressFillEl) {
-					refs.progressFillEl.style.setProperty(
-						"width",
-						`${result.snapshot.progressPercent.toFixed(2)}%`,
-					);
-					refs.progressFillEl.toggleClass(
-						"is-warning",
-						result.snapshot.isRefreshingSoon,
-					);
+				refs.countdownBadgeEl.style.setProperty(
+					"--countdown-progress",
+					`${result.snapshot.progressPercent.toFixed(2)}%`,
+				);
+				refs.countdownBadgeEl.removeClass("is-error");
+				refs.countdownBadgeEl.toggleClass(
+					"is-warning",
+					result.snapshot.isRefreshingSoon,
+				);
+				if (refs.nextCodeEl) {
+					this.renderStaticCode(refs.nextCodeEl, result.snapshot.nextCode);
 				}
-				if (refs.nextCodeEl && refs.nextCountdownEl) {
-					refs.nextCodeEl.setText(result.snapshot.nextCode);
-					refs.nextCountdownEl.setText(
-						this.plugin.t("view.entry.nextCountdown", {
-							seconds: result.snapshot.secondsRemaining,
-						}),
-					);
-				}
+				refs.previousCurrentCode = result.snapshot.currentCode;
 				continue;
 			}
 
-			refs.codeEl.setText(this.plugin.t("view.entry.error"));
+			this.setCurrentCodeText(refs, this.plugin.t("view.entry.error"));
 			refs.codeEl.addClass("is-error");
-			refs.countdownEl.setText(result.error ?? this.plugin.t("view.entry.refreshFallback"));
-			refs.progressFillEl?.style.setProperty("width", "0%");
-			refs.progressFillEl?.removeClass("is-warning");
-			refs.nextCodeEl?.setText("------");
-			refs.nextCountdownEl?.setText(this.plugin.t("view.entry.refreshFallback"));
+			refs.countdownEl.setText("!");
+			refs.countdownBadgeEl.style.setProperty("--countdown-progress", "0%");
+			refs.countdownBadgeEl.removeClass("is-warning");
+			refs.countdownBadgeEl.addClass("is-error");
+			refs.countdownBadgeEl.setAttribute(
+				"aria-label",
+				result.error ?? this.plugin.t("view.entry.refreshFallback"),
+			);
+			if (refs.nextCodeEl) {
+				this.renderStaticCode(refs.nextCodeEl, "------");
+			}
+			refs.previousCurrentCode = null;
 		}
+	}
+
+	private shouldReduceMotion(): boolean {
+		return (
+			typeof window !== "undefined" &&
+			typeof window.matchMedia === "function" &&
+			window.matchMedia("(prefers-reduced-motion: reduce)").matches
+		);
+	}
+
+	private updateCurrentCodeDisplay(
+		refs: EntryRowRefs,
+		nextCode: string,
+		animationMode: CodeAnimationMode,
+	): void {
+		if (
+			refs.previousCurrentCode === nextCode &&
+			refs.codeAnimationTimeoutId === null
+		) {
+			return;
+		}
+
+		if (
+			animationMode === "none" ||
+			refs.previousCurrentCode === null ||
+			refs.previousCurrentCode === nextCode
+		) {
+			this.setCurrentCodeText(refs, nextCode);
+			return;
+		}
+
+		this.startCodeTransition(
+			refs,
+			refs.previousCurrentCode,
+			nextCode,
+			animationMode,
+		);
+	}
+
+	private setCurrentCodeText(refs: EntryRowRefs, value: string): void {
+		this.cancelCodeTransition(refs);
+		this.renderStaticCode(refs.codeEl, value);
+	}
+
+	private startCodeTransition(
+		refs: EntryRowRefs,
+		previousCode: string,
+		nextCode: string,
+		animationMode: Exclude<CodeAnimationMode, "none">,
+	): void {
+		this.cancelCodeTransition(refs);
+		const animationToken = refs.codeAnimationToken;
+		refs.codeEl.empty();
+		const transitionEl = refs.codeEl.createSpan({
+			cls: `twofa-code-transition twofa-code-transition--${animationMode}`,
+		});
+		transitionEl.createSpan({
+			cls: "twofa-code-transition__layer twofa-code-transition__layer--old",
+			text: previousCode,
+		});
+		transitionEl.createSpan({
+			cls: "twofa-code-transition__layer twofa-code-transition__layer--new",
+			text: nextCode,
+		});
+
+		const animationDurationMs =
+			animationMode === "fade"
+				? CODE_TRANSITION_FADE_DURATION_MS
+				: CODE_TRANSITION_SLIDE_DURATION_MS;
+		refs.codeAnimationTimeoutId = window.setTimeout(() => {
+			if (refs.codeAnimationToken !== animationToken) {
+				return;
+			}
+
+			refs.codeAnimationTimeoutId = null;
+			this.renderStaticCode(refs.codeEl, nextCode);
+		}, animationDurationMs);
+	}
+
+	private cancelCodeTransition(refs: EntryRowRefs): void {
+		refs.codeAnimationToken += 1;
+		if (refs.codeAnimationTimeoutId !== null) {
+			window.clearTimeout(refs.codeAnimationTimeoutId);
+			refs.codeAnimationTimeoutId = null;
+		}
+	}
+
+	private clearCodeTransitions(): void {
+		for (const refs of this.rowRefs.values()) {
+			this.cancelCodeTransition(refs);
+		}
+	}
+
+	private renderStaticCode(containerEl: HTMLElement, value: string): void {
+		containerEl.empty();
+		containerEl.setText(value);
 	}
 
 	private showEntryContextMenu(entry: TotpEntryRecord, target: MouseEvent | HTMLElement): void {

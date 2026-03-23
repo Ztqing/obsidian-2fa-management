@@ -1,6 +1,7 @@
 import type { TotpEntryDraft } from "../../types";
 
 export type TotpEntryDraftField = keyof TotpEntryDraft;
+export type OtpauthImportIntent = "ignore" | "partial" | "import";
 
 export interface ClipboardImageItemLike {
 	type: string;
@@ -79,4 +80,14 @@ export function getChangedDraftFields(
 	next: TotpEntryDraft,
 ): TotpEntryDraftField[] {
 	return ENTRY_DRAFT_FIELDS.filter((field) => previous[field] !== next[field]);
+}
+
+export function getOtpauthImportIntent(value: string): OtpauthImportIntent {
+	const trimmedValue = value.trim();
+
+	if (!trimmedValue.startsWith("otpauth://")) {
+		return "ignore";
+	}
+
+	return trimmedValue.includes("secret=") ? "import" : "partial";
 }

@@ -16,6 +16,7 @@ import {
 	extractImageFileFromDataTransfer,
 	extractImageFileFromItems,
 	getChangedDraftFields,
+	getOtpauthImportIntent,
 	type TotpEntryDraftField,
 } from "./totp-entry-import";
 
@@ -57,13 +58,22 @@ class TotpEntryModal extends Modal {
 				? this.plugin.t("modal.entry.editTitle")
 				: this.plugin.t("modal.entry.addTitle"),
 		);
-		this.contentEl.createEl("p", {
-			text: this.plugin.t("modal.entry.intro"),
+		this.contentEl.addClass("twofa-entry-modal");
+
+		const importSection = this.contentEl.createDiv({
+			cls: "twofa-entry-modal__section twofa-entry-modal__section--import",
 		});
-		this.statusEl = this.contentEl.createDiv({
+		importSection.createEl("h4", {
+			cls: "twofa-entry-modal__section-title",
+			text: this.plugin.t("modal.entry.importSection"),
+		});
+		this.renderImportSurface(importSection);
+		this.statusEl = importSection.createDiv({
 			cls: "twofa-modal-status",
 		});
-		this.renderImportSurface();
+		this.statusEl.setAttribute("role", "status");
+		this.statusEl.setAttribute("aria-live", "polite");
+		this.statusEl.setAttribute("aria-atomic", "true");
 
 		this.fileInput = this.contentEl.createEl("input", {
 			type: "file",
@@ -82,12 +92,12 @@ class TotpEntryModal extends Modal {
 			}
 		});
 
-		new Setting(this.contentEl)
+		const linkSetting = new Setting(importSection)
 			.setName(this.plugin.t("modal.entry.importLink.name"))
 			.setDesc(this.plugin.t("modal.entry.importLink.description"))
 			.addTextArea((text) => {
 				this.uriInput = text;
-				text.inputEl.rows = 3;
+				text.inputEl.rows = 2;
 				text.inputEl.placeholder = this.plugin.t("modal.entry.importLink.placeholder");
 				text.setValue(
 					this.isEditing ? serializeOtpauthUri(this.initialDraft) : "",
@@ -95,23 +105,18 @@ class TotpEntryModal extends Modal {
 				text.onChange((value) => {
 					void this.maybeParseUri(value);
 				});
-			})
-			.addButton((button) => {
-				button.setButtonText(this.plugin.t("common.parseLink")).onClick(() => {
-					void this.importFromUri(this.uriInput?.getValue() ?? "");
-				});
 			});
+		linkSetting.settingEl.addClass("twofa-entry-modal__link-setting");
 
-		new Setting(this.contentEl)
-			.setName(this.plugin.t("modal.entry.importImage.name"))
-			.setDesc(this.plugin.t("modal.entry.importImage.description"))
-			.addButton((button) => {
-				button.setButtonText(this.plugin.t("common.chooseImage")).onClick(() => {
-					this.fileInput?.click();
-				});
-			});
+		const detailsSection = this.contentEl.createDiv({
+			cls: "twofa-entry-modal__section twofa-entry-modal__section--details",
+		});
+		detailsSection.createEl("h4", {
+			cls: "twofa-entry-modal__section-title",
+			text: this.plugin.t("modal.entry.detailsSection"),
+		});
 
-		const issuerSetting = new Setting(this.contentEl)
+		const issuerSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.issuer.name"))
 			.setDesc(this.plugin.t("modal.entry.issuer.description"))
 			.addText((text) => {
@@ -121,7 +126,7 @@ class TotpEntryModal extends Modal {
 			});
 		this.fieldElements.issuer = this.issuerInput?.inputEl ?? issuerSetting.settingEl;
 
-		const accountNameSetting = new Setting(this.contentEl)
+		const accountNameSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.accountName.name"))
 			.setDesc(this.plugin.t("modal.entry.accountName.description"))
 			.addText((text) => {
@@ -132,7 +137,7 @@ class TotpEntryModal extends Modal {
 		this.fieldElements.accountName =
 			this.accountNameInput?.inputEl ?? accountNameSetting.settingEl;
 
-		const secretSetting = new Setting(this.contentEl)
+		const secretSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.secret.name"))
 			.setDesc(this.plugin.t("modal.entry.secret.description"))
 			.addText((text) => {
@@ -144,7 +149,7 @@ class TotpEntryModal extends Modal {
 			});
 		this.fieldElements.secret = this.secretInput?.inputEl ?? secretSetting.settingEl;
 
-		const algorithmSetting = new Setting(this.contentEl)
+		const algorithmSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.algorithm.name"))
 			.setDesc(this.plugin.t("modal.entry.algorithm.description"))
 			.addDropdown((dropdown) => {
@@ -159,7 +164,7 @@ class TotpEntryModal extends Modal {
 		this.fieldElements.algorithm =
 			this.algorithmInput?.selectEl ?? algorithmSetting.settingEl;
 
-		const digitsSetting = new Setting(this.contentEl)
+		const digitsSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.digits.name"))
 			.setDesc(this.plugin.t("modal.entry.digits.description"))
 			.addText((text) => {
@@ -171,7 +176,7 @@ class TotpEntryModal extends Modal {
 			});
 		this.fieldElements.digits = this.digitsInput?.inputEl ?? digitsSetting.settingEl;
 
-		const periodSetting = new Setting(this.contentEl)
+		const periodSetting = new Setting(detailsSection)
 			.setName(this.plugin.t("modal.entry.period.name"))
 			.setDesc(this.plugin.t("modal.entry.period.description"))
 			.addText((text) => {
@@ -256,8 +261,8 @@ class TotpEntryModal extends Modal {
 		this.periodInput?.setValue(String(draft.period));
 	}
 
-	private renderImportSurface(): void {
-		const surface = this.contentEl.createDiv({
+	private renderImportSurface(containerEl: HTMLElement): void {
+		const surface = containerEl.createDiv({
 			cls: "twofa-import-surface",
 		});
 		surface.tabIndex = 0;
@@ -271,9 +276,9 @@ class TotpEntryModal extends Modal {
 			cls: "twofa-import-surface__description",
 			text: this.plugin.t("modal.entry.importImage.surfaceDescription"),
 		});
-		surface.createEl("p", {
-			cls: "twofa-import-surface__hint",
-			text: this.plugin.t("modal.entry.importImage.surfaceHint"),
+		surface.createEl("div", {
+			cls: "twofa-import-surface__action",
+			text: this.plugin.t("common.chooseImage"),
 		});
 		surface.addEventListener("click", () => {
 			this.fileInput?.click();
@@ -290,19 +295,19 @@ class TotpEntryModal extends Modal {
 	}
 
 	private async maybeParseUri(value: string): Promise<void> {
-		const trimmedValue = value.trim();
+		const importIntent = getOtpauthImportIntent(value);
 
-		if (!trimmedValue.startsWith("otpauth://")) {
+		if (importIntent === "ignore") {
 			this.setStatus("", false);
 			return;
 		}
 
-		if (!trimmedValue.includes("secret=")) {
+		if (importIntent === "partial") {
 			this.setStatus(this.plugin.t("modal.entry.status.partialLink"), false);
 			return;
 		}
 
-		await this.importFromUri(trimmedValue, false);
+		await this.importFromUri(value.trim(), false);
 	}
 
 	private async importFromUri(value: string, showSuccess = true): Promise<void> {
@@ -428,6 +433,7 @@ class TotpEntryModal extends Modal {
 		}
 
 		this.statusEl.setText(message);
+		this.statusEl.setAttribute("aria-live", isError ? "assertive" : "polite");
 		this.statusEl.toggleClass("is-error", isError);
 		this.statusEl.toggleClass("is-success", !isError && message.length > 0);
 	}
