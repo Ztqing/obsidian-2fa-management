@@ -1,0 +1,200 @@
+type FakeListener = (event: any) => void;
+
+export class FakeElement {
+	readonly attributes = new Map<string, string>();
+	readonly children: FakeElement[] = [];
+	readonly classList = new Set<string>();
+	readonly cssProps: Record<string, string> = {};
+	readonly listeners = new Map<string, FakeListener[]>();
+	checked = false;
+	disabled = false;
+	draggable = false;
+	parentElement: FakeElement | null = null;
+	placeholder = "";
+	tabIndex = 0;
+	textContent = "";
+	type = "";
+	value = "";
+
+	private boundingRect = {
+		height: 40,
+		right: 120,
+		top: 0,
+		width: 120,
+	};
+
+	constructor(readonly tagName: string) {}
+
+	createDiv(options: { cls?: string; text?: string } = {}): FakeElement {
+		return this.createEl("div", options);
+	}
+
+	createEl(
+		tagName: string,
+		options: {
+			cls?: string;
+			placeholder?: string;
+			text?: string;
+			type?: string;
+		} = {},
+	): FakeElement {
+		const element = new FakeElement(tagName);
+		if (options.cls) {
+			element.addClass(options.cls);
+		}
+		if (options.placeholder) {
+			element.placeholder = options.placeholder;
+		}
+		if (options.text) {
+			element.textContent = options.text;
+		}
+		if (options.type) {
+			element.type = options.type;
+		}
+		element.parentElement = this;
+		this.children.push(element);
+		return element;
+	}
+
+	createSpan(options: { cls?: string; text?: string } = {}): FakeElement {
+		return this.createEl("span", options);
+	}
+
+	addClass(value: string): void {
+		for (const className of value.split(/\s+/)) {
+			if (className.length > 0) {
+				this.classList.add(className);
+			}
+		}
+	}
+
+	addEventListener(type: string, listener: FakeListener): void {
+		const nextListeners = this.listeners.get(type) ?? [];
+		nextListeners.push(listener);
+		this.listeners.set(type, nextListeners);
+	}
+
+	dispatch(type: string, event: any = {}): void {
+		for (const listener of this.listeners.get(type) ?? []) {
+			listener(event);
+		}
+	}
+
+	empty(): void {
+		this.children.length = 0;
+		this.textContent = "";
+	}
+
+	findByClass(className: string): FakeElement | null {
+		if (this.classList.has(className)) {
+			return this;
+		}
+
+		for (const child of this.children) {
+			const match = child.findByClass(className);
+			if (match) {
+				return match;
+			}
+		}
+
+		return null;
+	}
+
+	findByTagName(tagName: string): FakeElement | null {
+		if (this.tagName === tagName) {
+			return this;
+		}
+
+		for (const child of this.children) {
+			const match = child.findByTagName(tagName);
+			if (match) {
+				return match;
+			}
+		}
+
+		return null;
+	}
+
+	findByText(text: string): FakeElement | null {
+		if (this.textContent === text) {
+			return this;
+		}
+
+		for (const child of this.children) {
+			const match = child.findByText(text);
+			if (match) {
+				return match;
+			}
+		}
+
+		return null;
+	}
+
+	getAttribute(name: string): string | null {
+		return this.attributes.get(name) ?? null;
+	}
+
+	getBoundingClientRect(): {
+		height: number;
+		right: number;
+		top: number;
+		width: number;
+	} {
+		return { ...this.boundingRect };
+	}
+
+	hasClass(className: string): boolean {
+		return this.classList.has(className);
+	}
+
+	removeClass(value: string): void {
+		this.classList.delete(value);
+	}
+
+	setBoundingClientRect(rect: {
+		height: number;
+		right: number;
+		top: number;
+		width: number;
+	}): void {
+		this.boundingRect = { ...rect };
+	}
+
+	setAttribute(name: string, value: string): void {
+		this.attributes.set(name, value);
+	}
+
+	setCssProps(props: Record<string, string>): void {
+		Object.assign(this.cssProps, props);
+	}
+
+	setText(text: string): void {
+		this.children.length = 0;
+		this.textContent = text;
+	}
+
+	toggleClass(className: string, force?: boolean): void {
+		if (force === undefined) {
+			if (this.classList.has(className)) {
+				this.classList.delete(className);
+			} else {
+				this.classList.add(className);
+			}
+			return;
+		}
+
+		if (force) {
+			this.classList.add(className);
+			return;
+		}
+
+		this.classList.delete(className);
+	}
+}
+
+export function collectTextContent(root: FakeElement): string[] {
+	return [
+		root.textContent,
+		...root.children.flatMap((child) => collectTextContent(child)),
+	].filter((value) => value.length > 0);
+}

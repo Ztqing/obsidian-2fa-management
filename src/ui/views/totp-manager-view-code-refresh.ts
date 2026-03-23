@@ -1,4 +1,7 @@
-import { createTotpDisplaySnapshot } from "../../totp/display";
+import {
+	createTotpDisplaySnapshot,
+	type TotpDisplaySnapshot,
+} from "../../totp/display";
 import type { TotpEntryRecord } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
 import {
@@ -26,9 +29,52 @@ export function renderStaticCode(containerEl: HTMLElement, value: string): void 
 	containerEl.setText(value);
 }
 
+interface TotpCodeRefreshTimerApi {
+	clearTimeout: (timerId: number) => void;
+	setTimeout: (handler: () => void, timeoutMs: number) => number;
+}
+
+export interface TotpCodeRefreshControllerDependencies {
+	createDisplaySnapshot?: (
+		entry: TotpEntryRecord,
+	) => Promise<TotpDisplaySnapshot>;
+	shouldReduceMotion?: () => boolean;
+	timerApi?: TotpCodeRefreshTimerApi;
+}
+
+function createWindowTimerApi(): TotpCodeRefreshTimerApi {
+	return {
+		clearTimeout: (timerId) => {
+			window.clearTimeout(timerId);
+		},
+		setTimeout: (handler, timeoutMs) => window.setTimeout(handler, timeoutMs),
+	};
+}
+
+function shouldReduceMotionByPreference(): boolean {
+	return (
+		typeof window !== "undefined" &&
+		typeof window.matchMedia === "function" &&
+		window.matchMedia("(prefers-reduced-motion: reduce)").matches
+	);
+}
+
 export class TotpCodeRefreshController {
 	private readonly rowRefs = new Map<string, EntryRowRefs>();
 	private refreshRun = 0;
+	private readonly createDisplaySnapshot: (
+		entry: TotpEntryRecord,
+	) => Promise<TotpDisplaySnapshot>;
+	private readonly shouldReduceMotion: () => boolean;
+	private readonly timerApi: TotpCodeRefreshTimerApi;
+
+	constructor(dependencies: TotpCodeRefreshControllerDependencies = {}) {
+		this.createDisplaySnapshot =
+			dependencies.createDisplaySnapshot ?? createTotpDisplaySnapshot;
+		this.shouldReduceMotion =
+			dependencies.shouldReduceMotion ?? shouldReduceMotionByPreference;
+		this.timerApi = dependencies.timerApi ?? createWindowTimerApi();
+	}
 
 	registerRow(entryId: string, refs: EntryRowRefs): void {
 		this.rowRefs.set(entryId, refs);
@@ -75,7 +121,7 @@ export class TotpCodeRefreshController {
 					return {
 						entryId: entry.id,
 						error: null,
-						snapshot: await createTotpDisplaySnapshot(entry),
+						snapshot: await this.createDisplaySnapshot(entry),
 					};
 				} catch (error) {
 					return {
@@ -152,14 +198,6 @@ export class TotpCodeRefreshController {
 		}
 	}
 
-	private shouldReduceMotion(): boolean {
-		return (
-			typeof window !== "undefined" &&
-			typeof window.matchMedia === "function" &&
-			window.matchMedia("(prefers-reduced-motion: reduce)").matches
-		);
-	}
-
 	private updateCurrentCodeDisplay(
 		refs: EntryRowRefs,
 		nextCode: string,
@@ -219,7 +257,7 @@ export class TotpCodeRefreshController {
 			animationMode === "fade"
 				? CODE_TRANSITION_FADE_DURATION_MS
 				: CODE_TRANSITION_SLIDE_DURATION_MS;
-		refs.codeAnimationTimeoutId = window.setTimeout(() => {
+		refs.codeAnimationTimeoutId = this.timerApi.setTimeout(() => {
 			if (refs.codeAnimationToken !== animationToken) {
 				return;
 			}
@@ -232,7 +270,7 @@ export class TotpCodeRefreshController {
 	private cancelCodeTransition(refs: EntryRowRefs): void {
 		refs.codeAnimationToken += 1;
 		if (refs.codeAnimationTimeoutId !== null) {
-			window.clearTimeout(refs.codeAnimationTimeoutId);
+			this.timerApi.clearTimeout(refs.codeAnimationTimeoutId);
 			refs.codeAnimationTimeoutId = null;
 		}
 	}
