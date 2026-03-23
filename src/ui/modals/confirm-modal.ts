@@ -1,6 +1,6 @@
 import { App, Modal, Setting } from "obsidian";
 
-interface ConfirmationOptions {
+export interface ConfirmationOptions {
 	cancelLabel: string;
 	title: string;
 	description: string;

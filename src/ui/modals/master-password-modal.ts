@@ -1,7 +1,7 @@
 import { Modal, Setting, TextComponent } from "obsidian";
 import type TwoFactorManagementPlugin from "../../plugin";
 
-interface MasterPasswordPromptOptions {
+export interface MasterPasswordPromptOptions {
 	title: string;
 	description: string;
 	submitLabel: string;

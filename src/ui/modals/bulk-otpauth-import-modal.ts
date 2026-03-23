@@ -10,6 +10,10 @@ import type {
 	TotpEntryRecord,
 } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
+import {
+	BulkOtpauthImportModalState,
+	formatBulkImportEntryLabel,
+} from "./bulk-otpauth-import-state";
 
 export interface BulkOtpauthImportModalResult {
 	preview: BulkOtpauthImportPreview;
@@ -24,10 +28,8 @@ class BulkOtpauthImportModal extends Modal {
 	private statusEl: HTMLElement | null = null;
 	private resultsEl: HTMLElement | null = null;
 	private importButton: ButtonComponent | null = null;
-	private preview: BulkOtpauthImportPreview | null = null;
-	private previewDirty = false;
 	private settled = false;
-	private readonly selectedDuplicateLineNumbers = new Set<number>();
+	private readonly state = new BulkOtpauthImportModalState();
 
 	constructor(
 		plugin: TwoFactorManagementPlugin,
@@ -57,12 +59,10 @@ class BulkOtpauthImportModal extends Modal {
 				text.inputEl.rows = 10;
 				text.inputEl.placeholder = this.plugin.t("modal.bulkImport.input.placeholder");
 				text.onChange(() => {
-					if (this.preview) {
-						this.previewDirty = true;
-						this.setStatus(this.plugin.t("modal.bulkImport.status.previewOutdated"), false);
-					} else {
-						this.setStatus(this.plugin.t("modal.bulkImport.status.previewRequired"), false);
-					}
+					this.setStatus(
+						this.plugin.t(this.state.handleSourceTextChanged()),
+						false,
+					);
 					this.updateImportButtonState();
 				});
 			});
@@ -110,45 +110,24 @@ class BulkOtpauthImportModal extends Modal {
 	}
 
 	private async handlePreview(): Promise<void> {
-		this.preview = createBulkOtpauthImportPreview(this.sourceInput?.getValue() ?? "", {
+		const preview = createBulkOtpauthImportPreview(this.sourceInput?.getValue() ?? "", {
 			existingEntries: this.existingEntries,
 			formatErrorMessage: (error) => this.plugin.getErrorMessage(error),
 		});
-		this.previewDirty = false;
-		this.selectedDuplicateLineNumbers.clear();
+		const statusKey = this.state.applyPreview(preview);
 		this.renderPreview();
-
-		if (this.preview.stats.actionableCount === 0) {
-			this.setStatus(this.plugin.t("modal.bulkImport.status.noActionable"), false);
-		} else {
-			this.setStatus(this.plugin.t("modal.bulkImport.status.previewReady"), false);
-		}
-
+		this.setStatus(this.plugin.t(statusKey), false);
 		this.updateImportButtonState();
 	}
 
 	private handleSubmit(): void {
-		if (!this.preview) {
-			this.setStatus(this.plugin.t("modal.bulkImport.status.previewRequired"), true);
+		const submitState = this.state.createSubmitState();
+		if (submitState.kind === "error") {
+			this.setStatus(this.plugin.t(submitState.statusKey), true);
 			return;
 		}
 
-		if (this.previewDirty) {
-			this.setStatus(this.plugin.t("modal.bulkImport.status.previewOutdated"), true);
-			return;
-		}
-
-		if (this.getImportableEntryCount() === 0) {
-			this.setStatus(this.plugin.t("modal.bulkImport.status.noActionable"), true);
-			return;
-		}
-
-		this.finish({
-			preview: this.preview,
-			selectedDuplicateLineNumbers: [...this.selectedDuplicateLineNumbers].sort(
-				(left, right) => left - right,
-			),
-		});
+		this.finish(submitState.result);
 	}
 
 	private renderPreview(): void {
@@ -158,7 +137,8 @@ class BulkOtpauthImportModal extends Modal {
 
 		this.resultsEl.empty();
 
-		if (!this.preview) {
+		const preview = this.state.getPreview();
+		if (!preview) {
 			return;
 		}
 
@@ -174,28 +154,42 @@ class BulkOtpauthImportModal extends Modal {
 		this.renderSummaryCard(
 			cards,
 			this.plugin.t("modal.bulkImport.summary.new"),
-			this.preview.stats.newCount,
+			preview.stats.newCount,
 		);
 		this.renderSummaryCard(
 			cards,
 			this.plugin.t("modal.bulkImport.summary.duplicateExisting"),
-			this.preview.stats.duplicateExistingCount,
+			preview.stats.duplicateExistingCount,
 		);
 		this.renderSummaryCard(
 			cards,
 			this.plugin.t("modal.bulkImport.summary.duplicateBatch"),
-			this.preview.stats.duplicateBatchCount,
+			preview.stats.duplicateBatchCount,
 		);
 		this.renderSummaryCard(
 			cards,
 			this.plugin.t("modal.bulkImport.summary.invalid"),
-			this.preview.stats.invalidCount,
+			preview.stats.invalidCount,
 		);
 
-		this.renderNewEntriesSection(this.preview.newEntries);
-		this.renderDuplicateExistingSection(this.preview.duplicateExistingEntries);
-		this.renderDuplicateBatchSection(this.preview.duplicateBatchEntries);
-		this.renderInvalidSection(this.preview.invalidEntries);
+		for (const section of this.state.getSections()) {
+			if (section.kind === "new") {
+				this.renderNewEntriesSection(section.entries);
+				continue;
+			}
+
+			if (section.kind === "duplicate-existing") {
+				this.renderDuplicateExistingSection(section.entries);
+				continue;
+			}
+
+			if (section.kind === "duplicate-batch") {
+				this.renderDuplicateBatchSection(section.entries);
+				continue;
+			}
+
+			this.renderInvalidSection(section.entries);
+		}
 	}
 
 	private renderSummaryCard(containerEl: HTMLElement, label: string, count: number): void {
@@ -261,13 +255,9 @@ class BulkOtpauthImportModal extends Modal {
 			const checkbox = label.createEl("input", {
 				type: "checkbox",
 			});
-			checkbox.checked = this.selectedDuplicateLineNumbers.has(entry.lineNumber);
+			checkbox.checked = this.state.isDuplicateSelectionEnabled(entry.lineNumber);
 			checkbox.addEventListener("change", () => {
-				if (checkbox.checked) {
-					this.selectedDuplicateLineNumbers.add(entry.lineNumber);
-				} else {
-					this.selectedDuplicateLineNumbers.delete(entry.lineNumber);
-				}
+				this.state.toggleDuplicateSelection(entry.lineNumber, checkbox.checked);
 				this.updateImportButtonState();
 			});
 
@@ -386,21 +376,11 @@ class BulkOtpauthImportModal extends Modal {
 	}
 
 	private formatEntryLabel(entry: Pick<TotpEntryDraft, "issuer" | "accountName">): string {
-		return entry.issuer.length > 0
-			? `${entry.issuer} / ${entry.accountName}`
-			: entry.accountName;
-	}
-
-	private getImportableEntryCount(): number {
-		if (!this.preview || this.previewDirty) {
-			return 0;
-		}
-
-		return this.preview.newEntries.length + this.selectedDuplicateLineNumbers.size;
+		return formatBulkImportEntryLabel(entry);
 	}
 
 	private updateImportButtonState(): void {
-		this.importButton?.setDisabled(this.getImportableEntryCount() === 0);
+		this.importButton?.setDisabled(this.state.isImportDisabled());
 	}
 
 	private setStatus(message: string, isError: boolean): void {

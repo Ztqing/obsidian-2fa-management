@@ -8,15 +8,20 @@ import {
 } from "obsidian";
 import { DEFAULT_TOTP_ENTRY } from "../../constants";
 import { normalizeTotpEntryDraft } from "../../data/store";
-import { parseOtpauthUri, serializeOtpauthUri } from "../../totp/otpauth";
-import { parseOtpauthUriFromQrImage } from "../../totp/qr";
+import { serializeOtpauthUri } from "../../totp/otpauth";
 import type { TotpAlgorithm, TotpEntryDraft } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
+import {
+	TotpEntryImportSurfaceController,
+	evaluateTotpEntryUriInput,
+	importDraftFromQrImage,
+	importDraftFromUri,
+	type TotpEntryImportResult,
+} from "./totp-entry-modal-controller";
 import {
 	extractImageFileFromDataTransfer,
 	extractImageFileFromItems,
 	getChangedDraftFields,
-	getOtpauthImportIntent,
 	type TotpEntryDraftField,
 } from "./totp-entry-import";
 
@@ -37,8 +42,8 @@ class TotpEntryModal extends Modal {
 	private readonly isEditing: boolean;
 	private readonly fieldElements: Partial<Record<TotpEntryDraftField, HTMLElement>> = {};
 	private importSurfaceEl: HTMLElement | null = null;
-	private dragDepth = 0;
 	private importHighlightTimeout: number | null = null;
+	private readonly importSurfaceState = new TotpEntryImportSurfaceController();
 
 	constructor(
 		plugin: TwoFactorManagementPlugin,
@@ -235,6 +240,7 @@ class TotpEntryModal extends Modal {
 			window.clearTimeout(this.importHighlightTimeout);
 			this.importHighlightTimeout = null;
 		}
+		this.importSurfaceState.reset();
 
 		if (!this.settled) {
 			this.resolve(null);
@@ -295,63 +301,56 @@ class TotpEntryModal extends Modal {
 	}
 
 	private async maybeParseUri(value: string): Promise<void> {
-		const importIntent = getOtpauthImportIntent(value);
+		const uriState = evaluateTotpEntryUriInput(value);
 
-		if (importIntent === "ignore") {
+		if (uriState.kind === "ignore") {
 			this.setStatus("", false);
 			return;
 		}
 
-		if (importIntent === "partial") {
-			this.setStatus(this.plugin.t("modal.entry.status.partialLink"), false);
+		if (uriState.kind === "partial") {
+			this.setStatus(this.plugin.t(uriState.statusKey), false);
 			return;
 		}
 
-		await this.importFromUri(value.trim(), false);
+		const result = importDraftFromUri(this.readDraftFromInputs(), uriState.value, {
+			dependencies: {
+				formatErrorMessage: (error) => this.getErrorMessage(error),
+				getChangedDraftFields,
+			},
+			showSuccessNotice: false,
+		});
+		this.applyImportResult(result);
 	}
 
 	private async importFromUri(value: string, showSuccess = true): Promise<void> {
-		try {
-			const currentDraft = this.readDraftFromInputs();
-			const parsedDraft = parseOtpauthUri(value);
-			this.applyDraft(parsedDraft);
-			this.highlightChangedFields(currentDraft, parsedDraft);
-			this.setStatus(this.plugin.t("modal.entry.status.importedLink"), false);
-			if (showSuccess) {
-				new Notice(this.plugin.t("notice.linkImported"));
-			}
-		} catch (error) {
-			this.setStatus(this.getErrorMessage(error), true);
-		}
+		const result = importDraftFromUri(this.readDraftFromInputs(), value, {
+			dependencies: {
+				formatErrorMessage: (error) => this.getErrorMessage(error),
+				getChangedDraftFields,
+			},
+			showSuccessNotice: showSuccess,
+		});
+		this.applyImportResult(result);
 	}
 
 	private async importQrImage(
 		file: Blob,
 		source: "clipboard" | "drop" | "picker" = "picker",
 	): Promise<void> {
-		try {
-			this.setStatus(this.plugin.t("modal.entry.status.readingImage"), false);
-			const currentDraft = this.readDraftFromInputs();
-			const uri = await parseOtpauthUriFromQrImage(file);
-			const parsedDraft = parseOtpauthUri(uri);
-			this.uriInput?.setValue(uri);
-			this.applyDraft(parsedDraft);
-			this.highlightChangedFields(currentDraft, parsedDraft);
-			this.setStatus(
-				this.plugin.t(
-					source === "clipboard"
-						? "modal.entry.status.importedPastedImage"
-						: source === "drop"
-							? "modal.entry.status.importedDroppedImage"
-							: "modal.entry.status.importedImage",
-				),
-				false,
-			);
-			new Notice(this.plugin.t("notice.imageImported"));
-		} catch (error) {
-			this.clearImportSurfaceState();
-			this.setStatus(this.getErrorMessage(error), true);
-		}
+		this.setStatus(this.plugin.t("modal.entry.status.readingImage"), false);
+		const result = await importDraftFromQrImage(
+			this.readDraftFromInputs(),
+			file,
+			source,
+			{
+				dependencies: {
+					formatErrorMessage: (error) => this.getErrorMessage(error),
+					getChangedDraftFields,
+				},
+			},
+		);
+		this.applyImportResult(result);
 	}
 
 	private async handlePaste(event: ClipboardEvent): Promise<void> {
@@ -367,50 +366,57 @@ class TotpEntryModal extends Modal {
 	}
 
 	private handleDragEnter(event: DragEvent): void {
-		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+		const surfaceChange = this.importSurfaceState.handleDragEnter(
+			Boolean(extractImageFileFromDataTransfer(event.dataTransfer)),
+		);
+
+		if (!surfaceChange.preventDefault) {
 			return;
 		}
 
 		event.preventDefault();
-		this.dragDepth += 1;
-		this.setImportSurfaceState("is-active");
+		this.syncImportSurfaceState(surfaceChange.active);
 	}
 
 	private handleDragOver(event: DragEvent): void {
-		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+		const surfaceChange = this.importSurfaceState.handleDragOver(
+			Boolean(extractImageFileFromDataTransfer(event.dataTransfer)),
+		);
+
+		if (!surfaceChange.preventDefault) {
 			return;
 		}
 
 		event.preventDefault();
-		if (event.dataTransfer) {
+		if (event.dataTransfer && surfaceChange.acceptsImage) {
 			event.dataTransfer.dropEffect = "copy";
 		}
-		this.setImportSurfaceState("is-active");
+		this.syncImportSurfaceState(surfaceChange.active);
 	}
 
 	private handleDragLeave(event: DragEvent): void {
-		if (!extractImageFileFromDataTransfer(event.dataTransfer)) {
+		const surfaceChange = this.importSurfaceState.handleDragLeave(
+			Boolean(extractImageFileFromDataTransfer(event.dataTransfer)),
+		);
+
+		if (!surfaceChange.preventDefault) {
 			return;
 		}
 
 		event.preventDefault();
-		this.dragDepth = Math.max(0, this.dragDepth - 1);
-
-		if (this.dragDepth === 0) {
-			this.clearImportSurfaceState();
-		}
+		this.syncImportSurfaceState(surfaceChange.active);
 	}
 
 	private async handleDrop(event: DragEvent): Promise<void> {
 		const imageFile = extractImageFileFromDataTransfer(event.dataTransfer);
+		const surfaceChange = this.importSurfaceState.handleDrop(Boolean(imageFile));
 
-		if (!imageFile) {
+		if (!surfaceChange.preventDefault || !imageFile) {
 			return;
 		}
 
 		event.preventDefault();
-		this.dragDepth = 0;
-		this.setImportSurfaceState("is-active");
+		this.syncImportSurfaceState(surfaceChange.active);
 		await this.importQrImage(imageFile, "drop");
 	}
 
@@ -439,21 +445,7 @@ class TotpEntryModal extends Modal {
 	}
 
 	private highlightChangedFields(previous: TotpEntryDraft, next: TotpEntryDraft): void {
-		this.clearImportSurfaceState();
-		this.clearImportHighlights();
-		const changedFields = getChangedDraftFields(previous, next);
-
-		if (changedFields.length === 0) {
-			return;
-		}
-
-		for (const field of changedFields) {
-			this.fieldElements[field]?.addClass("twofa-import-highlight");
-		}
-
-		this.importHighlightTimeout = window.setTimeout(() => {
-			this.clearImportHighlights();
-		}, 1800);
+		this.highlightFields(getChangedDraftFields(previous, next));
 	}
 
 	private clearImportHighlights(): void {
@@ -473,6 +465,52 @@ class TotpEntryModal extends Modal {
 
 	private clearImportSurfaceState(): void {
 		this.importSurfaceEl?.removeClass("is-active");
+	}
+
+	private applyImportResult(result: TotpEntryImportResult): void {
+		if (result.kind === "error") {
+			if (result.clearImportSurface) {
+				this.clearImportSurfaceState();
+			}
+			this.setStatus(result.message, true);
+			return;
+		}
+
+		if (result.uri) {
+			this.uriInput?.setValue(result.uri);
+		}
+		this.applyDraft(result.draft);
+		this.highlightFields(result.changedFields);
+		this.setStatus(this.plugin.t(result.statusKey), false);
+		if (result.noticeKey) {
+			new Notice(this.plugin.t(result.noticeKey));
+		}
+	}
+
+	private syncImportSurfaceState(isActive: boolean): void {
+		if (isActive) {
+			this.setImportSurfaceState("is-active");
+			return;
+		}
+
+		this.clearImportSurfaceState();
+	}
+
+	private highlightFields(changedFields: readonly TotpEntryDraftField[]): void {
+		this.clearImportSurfaceState();
+		this.clearImportHighlights();
+
+		if (changedFields.length === 0) {
+			return;
+		}
+
+		for (const field of changedFields) {
+			this.fieldElements[field]?.addClass("twofa-import-highlight");
+		}
+
+		this.importHighlightTimeout = window.setTimeout(() => {
+			this.clearImportHighlights();
+		}, 1800);
 	}
 
 	private finish(draft: TotpEntryDraft | null): void {
