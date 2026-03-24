@@ -65,7 +65,7 @@ Useful commands:
 
 For manual installation or release builds, copy these files into:
 
-`<vault>/.obsidian/plugins/obsidian-2fa-management/`
+`<vault>/.obsidian/plugins/2fa-management/`
 
 - `main.js`
 - `manifest.json`

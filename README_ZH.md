@@ -65,7 +65,7 @@ npm run dev
 
 手动安装或发布时，请将以下文件复制到：
 
-`<vault>/.obsidian/plugins/obsidian-2fa-management/`
+`<vault>/.obsidian/plugins/2fa-management/`
 
 - `main.js`
 - `manifest.json`

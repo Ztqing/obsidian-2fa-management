@@ -15,7 +15,7 @@ test("version-bump script always writes the current version mapping", async () =
 		path.join(tempDir, "manifest.json"),
 		JSON.stringify(
 			{
-				id: "obsidian-2fa-management",
+				id: "2fa-management",
 				version: "1.0.0",
 				minAppVersion: "1.8.7",
 			},
