@@ -53,7 +53,7 @@ class MasterPasswordModal extends Modal {
 				text.inputEl.addEventListener("keydown", (event) => {
 					if (event.key === "Enter") {
 						event.preventDefault();
-						void this.handleSubmit();
+						this.handleSubmit();
 					}
 				});
 			});
@@ -70,7 +70,7 @@ class MasterPasswordModal extends Modal {
 					text.inputEl.addEventListener("keydown", (event) => {
 						if (event.key === "Enter") {
 							event.preventDefault();
-							void this.handleSubmit();
+							this.handleSubmit();
 						}
 					});
 				});
@@ -85,7 +85,7 @@ class MasterPasswordModal extends Modal {
 		});
 		actions.addButton((button) => {
 			button.setButtonText(this.options.submitLabel).setCta().onClick(() => {
-				void this.handleSubmit();
+				this.handleSubmit();
 			});
 		});
 
@@ -102,7 +102,7 @@ class MasterPasswordModal extends Modal {
 		}
 	}
 
-	private async handleSubmit(): Promise<void> {
+	private handleSubmit(): void {
 		const password = this.passwordInput?.getValue() ?? "";
 		const confirmation = this.confirmationInput?.getValue() ?? "";
 		const validationIssue = validateMasterPasswordInput(password, {

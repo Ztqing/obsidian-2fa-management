@@ -81,7 +81,7 @@ class BulkOtpauthImportModal extends Modal {
 		});
 		actions.addButton((button) => {
 			button.setButtonText(this.plugin.t("common.previewImport")).onClick(() => {
-				void this.handlePreview();
+				this.handlePreview();
 			});
 		});
 		actions.addButton((button) => {
@@ -110,7 +110,7 @@ class BulkOtpauthImportModal extends Modal {
 		}
 	}
 
-	private async handlePreview(): Promise<void> {
+	private handlePreview(): void {
 		const preview = createBulkOtpauthImportPreview(this.sourceInput?.getValue() ?? "", {
 			existingEntries: this.existingEntries,
 			formatErrorMessage: (error) => this.plugin.getErrorMessage(error),

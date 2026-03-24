@@ -108,7 +108,7 @@ class TotpEntryModal extends Modal {
 					this.isEditing ? serializeOtpauthUri(this.initialDraft) : "",
 				);
 				text.onChange((value) => {
-					void this.maybeParseUri(value);
+					this.maybeParseUri(value);
 				});
 			});
 		linkSetting.settingEl.addClass("twofa-entry-modal__link-setting");
@@ -225,7 +225,7 @@ class TotpEntryModal extends Modal {
 				)
 				.setCta()
 				.onClick(() => {
-					void this.handleSubmit();
+					this.handleSubmit();
 				});
 		});
 
@@ -300,7 +300,7 @@ class TotpEntryModal extends Modal {
 		this.importSurfaceEl = surface;
 	}
 
-	private async maybeParseUri(value: string): Promise<void> {
+	private maybeParseUri(value: string): void {
 		const uriState = evaluateTotpEntryUriInput(value);
 
 		if (uriState.kind === "ignore") {
@@ -323,7 +323,7 @@ class TotpEntryModal extends Modal {
 		this.applyImportResult(result);
 	}
 
-	private async importFromUri(value: string, showSuccess = true): Promise<void> {
+	private importFromUri(value: string, showSuccess = true): void {
 		const result = importDraftFromUri(this.readDraftFromInputs(), value, {
 			dependencies: {
 				formatErrorMessage: (error) => this.getErrorMessage(error),
@@ -420,7 +420,7 @@ class TotpEntryModal extends Modal {
 		await this.importQrImage(imageFile, "drop");
 	}
 
-	private async handleSubmit(): Promise<void> {
+	private handleSubmit(): void {
 		try {
 			const normalizedDraft = normalizeTotpEntryDraft(this.readDraftFromInputs());
 			this.finish(normalizedDraft);
