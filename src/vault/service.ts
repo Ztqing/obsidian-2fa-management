@@ -1,7 +1,7 @@
 import { DEFAULT_PLUGIN_DATA } from "../constants";
 import {
 	getNextTotpSortOrder,
-	normalizePluginData,
+	normalizePluginDataWithIssues,
 	normalizeTotpEntryDraft,
 	reindexTotpEntries,
 } from "../data/store";
@@ -16,6 +16,7 @@ import type {
 	PreferredSide,
 	TotpEntryDraft,
 	TotpEntryRecord,
+	VaultLoadIssue,
 } from "../types";
 
 export interface TwoFactorVaultServiceDependencies {
@@ -28,6 +29,7 @@ export class TwoFactorVaultService {
 	private pluginData: PluginData = DEFAULT_PLUGIN_DATA;
 	private unlockedEntries: TotpEntryRecord[] | null = null;
 	private sessionPassword: string | null = null;
+	private vaultLoadIssue: VaultLoadIssue | null = null;
 	private writeQueue: Promise<void> = Promise.resolve();
 	private sessionToken = 0;
 
@@ -35,16 +37,28 @@ export class TwoFactorVaultService {
 
 	async load(): Promise<void> {
 		await this.writeQueue;
-		this.pluginData = normalizePluginData(await this.dependencies.loadData());
+		const { pluginData, vaultLoadIssue } = normalizePluginDataWithIssues(
+			await this.dependencies.loadData(),
+		);
+		this.pluginData = pluginData;
+		this.vaultLoadIssue = vaultLoadIssue;
 		this.clearUnlockedState();
 	}
 
 	isVaultInitialized(): boolean {
-		return this.pluginData.vault !== null;
+		return this.vaultLoadIssue === null && this.pluginData.vault !== null;
 	}
 
 	isUnlocked(): boolean {
 		return this.unlockedEntries !== null;
+	}
+
+	hasVaultLoadIssue(): boolean {
+		return this.vaultLoadIssue !== null;
+	}
+
+	getVaultLoadIssue(): VaultLoadIssue | null {
+		return this.vaultLoadIssue;
 	}
 
 	getEntries(): TotpEntryRecord[] {
@@ -93,6 +107,7 @@ export class TwoFactorVaultService {
 
 	async initializeVault(password: string): Promise<void> {
 		await this.enqueueWrite(async () => {
+			this.assertVaultCanBeCreated();
 			const nextEntries: TotpEntryRecord[] = [];
 			const nextVault = await encryptVaultEntries(nextEntries, password);
 			const nextPluginData = this.createNextPluginData({
@@ -102,12 +117,14 @@ export class TwoFactorVaultService {
 
 			await this.persistPluginData(nextPluginData);
 			this.pluginData = nextPluginData;
+			this.vaultLoadIssue = null;
 			this.beginUnlockedSession(nextEntries, password);
 		});
 	}
 
 	async unlockVault(password: string): Promise<void> {
 		await this.writeQueue;
+		this.assertVaultAvailable();
 
 		if (!this.pluginData.vault) {
 			throw createUserError("vault_unlock_required");
@@ -133,6 +150,7 @@ export class TwoFactorVaultService {
 
 			await this.persistPluginData(nextPluginData);
 			this.pluginData = nextPluginData;
+			this.vaultLoadIssue = null;
 			this.syncUnlockedSession(currentEntries, nextPassword, currentSessionToken);
 		});
 	}
@@ -281,11 +299,14 @@ export class TwoFactorVaultService {
 
 			await this.persistPluginData(nextPluginData);
 			this.pluginData = nextPluginData;
+			this.vaultLoadIssue = null;
 			this.clearUnlockedState();
 		});
 	}
 
 	private requireUnlockedEntries(): TotpEntryRecord[] {
+		this.assertVaultAvailable();
+
 		if (!this.unlockedEntries || !this.sessionPassword) {
 			throw createUserError("vault_unlock_required");
 		}
@@ -294,6 +315,8 @@ export class TwoFactorVaultService {
 	}
 
 	private requireSessionPassword(): string {
+		this.assertVaultAvailable();
+
 		if (!this.sessionPassword) {
 			throw createUserError("vault_unlock_required");
 		}
@@ -305,8 +328,22 @@ export class TwoFactorVaultService {
 		expectedVaultRevision: number,
 		errorCode: "bulk_import_preview_stale" | "entry_changed_during_edit",
 	): void {
+		this.assertVaultAvailable();
+
 		if (expectedVaultRevision !== this.pluginData.vaultRevision) {
 			throw createUserError(errorCode);
+		}
+	}
+
+	private assertVaultAvailable(): void {
+		if (this.vaultLoadIssue !== null) {
+			throw createUserError("vault_repair_required");
+		}
+	}
+
+	private assertVaultCanBeCreated(): void {
+		if (this.vaultLoadIssue !== null) {
+			throw createUserError("vault_repair_required");
 		}
 	}
 
@@ -328,6 +365,7 @@ export class TwoFactorVaultService {
 
 		await this.persistPluginData(nextPluginData);
 		this.pluginData = nextPluginData;
+		this.vaultLoadIssue = null;
 		this.syncUnlockedSession(nextEntries, nextPassword, currentSessionToken);
 	}
 

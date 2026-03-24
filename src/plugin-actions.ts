@@ -1,4 +1,5 @@
 import type { TranslationKey } from "./i18n/translations";
+import { MIN_MASTER_PASSWORD_LENGTH } from "./security/master-password";
 import type {
 	BulkOtpauthImportCommitResult,
 	BulkOtpauthImportSubmission,
@@ -19,6 +20,7 @@ export interface TwoFactorVaultServiceLike {
 	getEntries(): TotpEntryRecord[];
 	getPreferredSide(): "left" | "right";
 	getVaultRevision(): number;
+	hasVaultLoadIssue(): boolean;
 	initializeVault(password: string): Promise<void>;
 	isUnlocked(): boolean;
 	isVaultInitialized(): boolean;
@@ -64,6 +66,10 @@ export class TwoFactorPluginActions {
 	}
 
 	async promptToInitializeVault(): Promise<boolean> {
+		if (this.ensureVaultRepairNotRequired()) {
+			return false;
+		}
+
 		if (this.environment.service.isVaultInitialized()) {
 			this.environment.showNotice(this.environment.t("notice.vaultExists"));
 			return false;
@@ -73,6 +79,7 @@ export class TwoFactorPluginActions {
 			title: this.environment.t("prompt.createVault.title"),
 			description: this.environment.t("prompt.createVault.description"),
 			submitLabel: this.environment.t("prompt.createVault.submit"),
+			minimumLength: MIN_MASTER_PASSWORD_LENGTH,
 			requireConfirmation: true,
 		});
 
@@ -88,6 +95,10 @@ export class TwoFactorPluginActions {
 	}
 
 	async promptToUnlockVault(): Promise<boolean> {
+		if (this.ensureVaultRepairNotRequired()) {
+			return false;
+		}
+
 		if (!this.environment.service.isVaultInitialized()) {
 			this.environment.showNotice(this.environment.t("notice.vaultCreateFirst"));
 			return false;
@@ -121,6 +132,10 @@ export class TwoFactorPluginActions {
 	}
 
 	async promptToChangeMasterPassword(): Promise<boolean> {
+		if (this.ensureVaultRepairNotRequired()) {
+			return false;
+		}
+
 		if (!this.environment.service.isUnlocked()) {
 			this.environment.showNotice(
 				this.environment.t("notice.unlockBeforePasswordChange"),
@@ -132,6 +147,7 @@ export class TwoFactorPluginActions {
 			title: this.environment.t("prompt.changePassword.title"),
 			description: this.environment.t("prompt.changePassword.description"),
 			submitLabel: this.environment.t("prompt.changePassword.submit"),
+			minimumLength: MIN_MASTER_PASSWORD_LENGTH,
 			requireConfirmation: true,
 		});
 
@@ -323,7 +339,15 @@ export class TwoFactorPluginActions {
 			title: this.environment.t("confirm.clearVault.title"),
 			description: this.environment.t("confirm.clearVault.description"),
 			confirmLabel: this.environment.t("confirm.clearVault.confirmLabel"),
+			confirmationDescription: this.environment.t(
+				"confirm.clearVault.confirmationDescription",
+			),
+			confirmationLabel: this.environment.t("confirm.clearVault.confirmationLabel"),
+			confirmationPlaceholder: this.environment.t(
+				"confirm.clearVault.confirmationPlaceholder",
+			),
 			cancelLabel: this.environment.t("common.cancel"),
+			requireTextConfirmation: "CLEAR",
 			warning: true,
 		});
 
@@ -348,6 +372,10 @@ export class TwoFactorPluginActions {
 	}
 
 	private async ensureVaultReadyForManagement(): Promise<boolean> {
+		if (this.ensureVaultRepairNotRequired()) {
+			return false;
+		}
+
 		if (!this.environment.service.isVaultInitialized()) {
 			const didInitialize = await this.promptToInitializeVault();
 			if (!didInitialize) {
@@ -362,6 +390,15 @@ export class TwoFactorPluginActions {
 			}
 		}
 
+		return true;
+	}
+
+	private ensureVaultRepairNotRequired(): boolean {
+		if (!this.environment.service.hasVaultLoadIssue()) {
+			return false;
+		}
+
+		this.environment.showNotice(this.environment.t("notice.vaultRepairRequired"));
 		return true;
 	}
 

@@ -11,6 +11,7 @@ import type {
 	TotpEntryRecord,
 	TranslationVariables,
 	UiLocale,
+	VaultLoadIssue,
 } from "./types";
 import { createRandomId } from "./utils/id";
 import { openBulkOtpauthImportModal } from "./ui/modals/bulk-otpauth-import-modal";
@@ -84,6 +85,14 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	isVaultInitialized(): boolean {
 		return this.vaultService.isVaultInitialized();
+	}
+
+	hasVaultLoadIssue(): boolean {
+		return this.vaultService.hasVaultLoadIssue();
+	}
+
+	getVaultLoadIssue(): VaultLoadIssue | null {
+		return this.vaultService.getVaultLoadIssue();
 	}
 
 	isUnlocked(): boolean {

@@ -21,10 +21,13 @@ function createEntryRecord(id: string, draft: TotpEntryDraft = sampleDraft): Tot
 }
 
 function createEnvironment(options: {
+	hasVaultLoadIssue?: boolean;
 	isUnlocked?: boolean;
 	isVaultInitialized?: boolean;
 } = {}) {
 	const callLog: string[] = [];
+	const confirmationRequests: unknown[] = [];
+	let hasVaultLoadIssue = options.hasVaultLoadIssue ?? false;
 	let isUnlocked = options.isUnlocked ?? false;
 	let isVaultInitialized = options.isVaultInitialized ?? false;
 	let entries: TotpEntryRecord[] = [];
@@ -62,6 +65,7 @@ function createEnvironment(options: {
 			isVaultInitialized = true;
 			isUnlocked = true;
 		},
+		hasVaultLoadIssue: () => hasVaultLoadIssue,
 		isUnlocked: () => isUnlocked,
 		isVaultInitialized: () => isVaultInitialized,
 		lockVault: () => {
@@ -92,7 +96,10 @@ function createEnvironment(options: {
 	};
 
 	const environment = {
-		confirmAction: async () => true,
+		confirmAction: async (options: unknown) => {
+			confirmationRequests.push(options);
+			return true;
+		},
 		getErrorMessage: () => "translated-error",
 		open2FAView: async () => {
 			callLog.push("open2FAView");
@@ -141,15 +148,20 @@ function createEnvironment(options: {
 	return {
 		actions: new TwoFactorPluginActions(environment),
 		callLog,
+		confirmationRequests,
 		environment,
 		service,
 		setEntries: (nextEntries: TotpEntryRecord[]) => {
 			entries = nextEntries;
 		},
 		setLockedState: (nextLockedState: {
+			hasVaultLoadIssue?: boolean;
 			isUnlocked?: boolean;
 			isVaultInitialized?: boolean;
 		}) => {
+			if (typeof nextLockedState.hasVaultLoadIssue === "boolean") {
+				hasVaultLoadIssue = nextLockedState.hasVaultLoadIssue;
+			}
 			if (typeof nextLockedState.isUnlocked === "boolean") {
 				isUnlocked = nextLockedState.isUnlocked;
 			}
@@ -221,8 +233,21 @@ test("TwoFactorPluginActions adds an entry through the ready-management workflow
 	]);
 });
 
-test("TwoFactorPluginActions confirms reset and refreshes the UI after clearing the vault", async () => {
+test("TwoFactorPluginActions blocks create flow until unreadable vault data is cleared", async () => {
 	const { actions, callLog } = createEnvironment({
+		hasVaultLoadIssue: true,
+		isUnlocked: false,
+		isVaultInitialized: false,
+	});
+
+	const didInitialize = await actions.promptToInitializeVault();
+
+	assert.equal(didInitialize, false);
+	assert.deepEqual(callLog, ["notice:notice.vaultRepairRequired"]);
+});
+
+test("TwoFactorPluginActions confirms reset with typed confirmation and refreshes the UI", async () => {
+	const { actions, callLog, confirmationRequests } = createEnvironment({
 		isUnlocked: true,
 		isVaultInitialized: true,
 	});
@@ -230,6 +255,19 @@ test("TwoFactorPluginActions confirms reset and refreshes the UI after clearing 
 	const didReset = await actions.confirmAndResetVault();
 
 	assert.equal(didReset, true);
+	assert.deepEqual(confirmationRequests, [
+		{
+			cancelLabel: "common.cancel",
+			confirmLabel: "confirm.clearVault.confirmLabel",
+			confirmationDescription: "confirm.clearVault.confirmationDescription",
+			confirmationLabel: "confirm.clearVault.confirmationLabel",
+			confirmationPlaceholder: "confirm.clearVault.confirmationPlaceholder",
+			description: "confirm.clearVault.description",
+			requireTextConfirmation: "CLEAR",
+			title: "confirm.clearVault.title",
+			warning: true,
+		},
+	]);
 	assert.deepEqual(callLog, [
 		"service.resetVault",
 		"refreshAllViews",

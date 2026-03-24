@@ -44,6 +44,7 @@ test("TwoFactorVaultService initializes, locks, and unlocks the vault", async ()
 	await service.load();
 	assert.equal(service.isVaultInitialized(), false);
 	assert.equal(service.isUnlocked(), false);
+	assert.equal(service.hasVaultLoadIssue(), false);
 
 	await service.initializeVault("vault-password");
 	assert.equal(service.isVaultInitialized(), true);
@@ -57,6 +58,54 @@ test("TwoFactorVaultService initializes, locks, and unlocks the vault", async ()
 	await service.unlockVault("vault-password");
 	assert.equal(service.isUnlocked(), true);
 	assert.deepEqual(service.getEntries(), []);
+});
+
+test("TwoFactorVaultService flags unreadable vault data and clears the repair state after reset", async () => {
+	const { service } = createService({
+		schemaVersion: 1,
+		settings: {},
+		vault: {
+			version: 1,
+			saltB64: 123,
+		},
+		vaultRevision: 4,
+	});
+
+	await service.load();
+
+	assert.equal(service.hasVaultLoadIssue(), true);
+	assert.equal(service.getVaultLoadIssue(), "corrupted");
+	assert.equal(service.isVaultInitialized(), false);
+
+	await assert.rejects(
+		async () => {
+			await service.initializeVault("vault-password");
+		},
+		(error: unknown) =>
+			error instanceof Error &&
+			"code" in error &&
+			error.code === "vault_repair_required",
+	);
+
+	await service.resetVault();
+
+	assert.equal(service.hasVaultLoadIssue(), false);
+	assert.equal(service.getVaultLoadIssue(), null);
+	assert.equal(service.isVaultInitialized(), false);
+});
+
+test("TwoFactorVaultService flags unsupported stored schema versions", async () => {
+	const { service } = createService({
+		schemaVersion: 99,
+		settings: {},
+		vault: null,
+		vaultRevision: 1,
+	});
+
+	await service.load();
+
+	assert.equal(service.hasVaultLoadIssue(), true);
+	assert.equal(service.getVaultLoadIssue(), "unsupported_version");
 });
 
 test("TwoFactorVaultService persists add, update, delete, and reorder operations", async () => {

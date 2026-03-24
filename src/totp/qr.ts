@@ -1,6 +1,49 @@
 import jsQR from "jsqr";
+import {
+	QR_IMPORT_MAX_DIMENSION,
+	QR_IMPORT_MAX_PIXELS,
+} from "../constants";
 import { createUserError } from "../errors";
 import { parseOtpauthUri } from "./otpauth";
+
+export interface QrImageDataLike {
+	data: Uint8ClampedArray;
+	height: number;
+	width: number;
+}
+
+export function getNormalizedQrImageSize(
+	width: number,
+	height: number,
+): {
+	height: number;
+	width: number;
+} {
+	if (
+		!Number.isFinite(width) ||
+		!Number.isFinite(height) ||
+		width <= 0 ||
+		height <= 0
+	) {
+		throw createUserError("image_read_failed");
+	}
+
+	const scaleByDimension = Math.min(
+		1,
+		QR_IMPORT_MAX_DIMENSION / width,
+		QR_IMPORT_MAX_DIMENSION / height,
+	);
+	const scaleByPixels = Math.min(
+		1,
+		Math.sqrt(QR_IMPORT_MAX_PIXELS / (width * height)),
+	);
+	const scale = Math.min(scaleByDimension, scaleByPixels);
+
+	return {
+		height: Math.max(1, Math.round(height * scale)),
+		width: Math.max(1, Math.round(width * scale)),
+	};
+}
 
 async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap | HTMLImageElement> {
 	if (typeof createImageBitmap === "function") {
@@ -24,8 +67,7 @@ async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap | HTMLImageEle
 
 async function getImageData(blob: Blob): Promise<ImageData> {
 	const image = await blobToImageBitmap(blob);
-	const width = image.width;
-	const height = image.height;
+	const { width, height } = getNormalizedQrImageSize(image.width, image.height);
 	const canvas = document.createElement("canvas");
 	canvas.width = width;
 	canvas.height = height;
@@ -47,14 +89,7 @@ async function getImageData(blob: Blob): Promise<ImageData> {
 	return context.getImageData(0, 0, width, height);
 }
 
-export function validateQrPayload(value: string): string {
-	const trimmedValue = value.trim();
-	parseOtpauthUri(trimmedValue);
-	return trimmedValue;
-}
-
-export async function parseOtpauthUriFromQrImage(blob: Blob): Promise<string> {
-	const imageData = await getImageData(blob);
+export function decodeOtpauthUriFromImageData(imageData: QrImageDataLike): string {
 	const result = jsQR(imageData.data, imageData.width, imageData.height, {
 		inversionAttempts: "attemptBoth",
 	});
@@ -64,4 +99,20 @@ export async function parseOtpauthUriFromQrImage(blob: Blob): Promise<string> {
 	}
 
 	return validateQrPayload(result.data);
+}
+
+export function validateQrPayload(value: string): string {
+	const trimmedValue = value.trim();
+	parseOtpauthUri(trimmedValue);
+	return trimmedValue;
+}
+
+export async function parseOtpauthUriFromQrImage(
+	blob: Blob,
+	dependencies: {
+		getImageData?: (blob: Blob) => Promise<QrImageDataLike>;
+	} = {},
+): Promise<string> {
+	const imageData = await (dependencies.getImageData ?? getImageData)(blob);
+	return decodeOtpauthUriFromImageData(imageData);
 }

@@ -3,6 +3,7 @@ export type PreferredSide = "left" | "right";
 export type TotpAlgorithm = "SHA-1" | "SHA-256" | "SHA-512";
 export type UiLocale = "en" | "zh-CN" | "zh-TW";
 export type TranslationVariables = Record<string, number | string>;
+export type VaultLoadIssue = "corrupted" | "unsupported_version";
 
 export interface EncryptedVaultData {
 	version: 1;

@@ -73,6 +73,24 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 				});
 			});
 
+		if (this.plugin.hasVaultLoadIssue()) {
+			new Setting(containerEl)
+				.setName(this.plugin.t("settings.repair.heading"))
+				.setHeading();
+			containerEl.createEl("p", {
+				text: this.plugin.t("settings.repair.description"),
+			});
+			new Setting(containerEl)
+				.setName(this.plugin.t("settings.repair.clearVault.name"))
+				.setDesc(this.plugin.t("settings.repair.clearVault.description"))
+				.addButton((button) => {
+					button.setButtonText(this.plugin.t("common.clearVault")).setWarning().onClick(() => {
+						void this.runGuardedTask(() => this.handleResetVault());
+					});
+				});
+			return;
+		}
+
 		if (!this.plugin.isVaultInitialized()) {
 			new Setting(containerEl)
 				.setName(this.plugin.t("settings.createVault.name"))

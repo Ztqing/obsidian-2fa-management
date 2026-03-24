@@ -24,6 +24,7 @@ export type TwoFaUserErrorCode =
 	| "stored_vault_payload_invalid"
 	| "unexpected_error"
 	| "unsupported_algorithm"
+	| "vault_repair_required"
 	| "vault_data_corrupted"
 	| "vault_unlock_required";
 
@@ -69,6 +70,7 @@ export const USER_ERROR_TRANSLATION_KEYS: Record<TwoFaUserErrorCode, Translation
 	stored_vault_payload_invalid: "error.storedVaultPayloadInvalid",
 	unexpected_error: "error.unexpected",
 	unsupported_algorithm: "error.unsupportedAlgorithm",
+	vault_repair_required: "error.vaultRepairRequired",
 	vault_data_corrupted: "error.vaultDataCorrupted",
 	vault_unlock_required: "error.vaultUnlockRequired",
 };

@@ -134,6 +134,7 @@ class TotpManagerViewMenuAdapter implements TotpManagerViewMenuLike {
 type TranslationKey = Parameters<TwoFactorManagementPlugin["t"]>[0];
 
 export interface TotpManagerViewControllerEnvironment {
+	confirmAndResetVault(): Promise<boolean>;
 	confirmAndDeleteEntries(entries: readonly TotpEntryRecord[]): Promise<boolean>;
 	confirmAndDeleteEntry(entry: TotpEntryRecord): Promise<boolean>;
 	copyTextToClipboard(text: string): Promise<void>;
@@ -187,6 +188,7 @@ export function createTotpManagerViewControllerEnvironment(
 	plugin: TwoFactorManagementPlugin,
 ): TotpManagerViewControllerEnvironment {
 	return {
+		confirmAndResetVault: async () => plugin.confirmAndResetVault(),
 		confirmAndDeleteEntries: async (entries) =>
 			plugin.confirmAndDeleteEntries(entries),
 		confirmAndDeleteEntry: async (entry) => plugin.confirmAndDeleteEntry(entry),
@@ -256,6 +258,9 @@ export class TotpManagerViewController {
 			onCardPointerMove: (entry, card, event) => {
 				this.handleCardPointerMove(entry, card, event);
 			},
+			onClearVault: () => {
+				void this.handleClearVault();
+			},
 			onCreateVault: () => {
 				void this.handleCreateVault();
 			},
@@ -278,6 +283,10 @@ export class TotpManagerViewController {
 				void this.handleUnlockVault();
 			},
 		};
+	}
+
+	async handleClearVault(): Promise<boolean> {
+		return this.environment.confirmAndResetVault();
 	}
 
 	async handleAddEntry(): Promise<boolean> {

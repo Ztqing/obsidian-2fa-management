@@ -1,9 +1,14 @@
 import { Modal, Setting, TextComponent } from "obsidian";
 import type TwoFactorManagementPlugin from "../../plugin";
+import {
+	type MasterPasswordValidationIssue,
+	validateMasterPasswordInput,
+} from "../../security/master-password";
 
 export interface MasterPasswordPromptOptions {
 	title: string;
 	description: string;
+	minimumLength?: number;
 	submitLabel: string;
 	requireConfirmation?: boolean;
 }
@@ -100,18 +105,32 @@ class MasterPasswordModal extends Modal {
 	private async handleSubmit(): Promise<void> {
 		const password = this.passwordInput?.getValue() ?? "";
 		const confirmation = this.confirmationInput?.getValue() ?? "";
+		const validationIssue = validateMasterPasswordInput(password, {
+			confirmation,
+			minimumLength: this.options.minimumLength,
+			requireConfirmation: this.options.requireConfirmation,
+		});
 
-		if (password.length === 0) {
-			this.setStatus(this.plugin.t("modal.masterPassword.status.empty"), true);
-			return;
-		}
-
-		if (this.options.requireConfirmation && password !== confirmation) {
-			this.setStatus(this.plugin.t("modal.masterPassword.status.mismatch"), true);
+		if (validationIssue) {
+			this.setStatus(this.getValidationMessage(validationIssue), true);
 			return;
 		}
 
 		this.finish(password);
+	}
+
+	private getValidationMessage(issue: MasterPasswordValidationIssue): string {
+		if (issue === "empty") {
+			return this.plugin.t("modal.masterPassword.status.empty");
+		}
+
+		if (issue === "too_short") {
+			return this.plugin.t("modal.masterPassword.status.tooShort", {
+				minimum: this.options.minimumLength ?? 0,
+			});
+		}
+
+		return this.plugin.t("modal.masterPassword.status.mismatch");
 	}
 
 	private setStatus(message: string, isError: boolean): void {

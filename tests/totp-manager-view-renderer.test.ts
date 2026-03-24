@@ -57,6 +57,9 @@ function createActionsLog() {
 		onCardPointerMove: (entry) => {
 			events.push(`pointer-move:${entry.id}`);
 		},
+		onClearVault: () => {
+			events.push("clear-vault");
+		},
 		onCreateVault: () => {
 			events.push("create-vault");
 		},
@@ -189,6 +192,7 @@ test("TotpManagerViewRenderer resets unavailable state and renders create/unlock
 		isVaultInitialized: true,
 		showFloatingLockButton: true,
 		showUpcomingCodes: false,
+		vaultLoadIssue: null,
 	});
 
 	assert.equal(harness.state.isSelectionMode(), false);
@@ -203,10 +207,30 @@ test("TotpManagerViewRenderer resets unavailable state and renders create/unlock
 		isVaultInitialized: false,
 		showFloatingLockButton: true,
 		showUpcomingCodes: false,
+		vaultLoadIssue: null,
 	});
 
 	assert.ok(harness.root.findByText("common.createVault"));
 	assert.equal(harness.getResetRowsCalls(), 2);
+});
+
+test("TotpManagerViewRenderer renders a repair shell when stored vault data is unreadable", () => {
+	const harness = createRendererHarness();
+
+	harness.renderer.render(harness.root as unknown as HTMLElement, {
+		entries: harness.entries,
+		isUnlocked: false,
+		isVaultInitialized: false,
+		showFloatingLockButton: true,
+		showUpcomingCodes: false,
+		vaultLoadIssue: "corrupted",
+	});
+
+	assert.ok(harness.root.findByText("view.loadError.title"));
+	const clearButton = harness.root.findByText("common.clearVault");
+	assert.ok(clearButton);
+	clearButton.dispatch("click");
+	assert.deepEqual(harness.events, ["clear-vault"]);
 });
 
 test("TotpManagerViewRenderer forwards search changes and renders dock controls by selection state", () => {
@@ -218,6 +242,7 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 		isVaultInitialized: true,
 		showFloatingLockButton: true,
 		showUpcomingCodes: false,
+		vaultLoadIssue: null,
 	});
 
 	const searchInput = harness.root.findByClass("twofa-search-input");
@@ -256,6 +281,7 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 			isVaultInitialized: true,
 			showFloatingLockButton: true,
 			showUpcomingCodes: false,
+			vaultLoadIssue: null,
 		},
 		"body",
 	);
@@ -291,6 +317,7 @@ test("TotpManagerViewRenderer forwards search changes and renders dock controls 
 			isVaultInitialized: true,
 			showFloatingLockButton: true,
 			showUpcomingCodes: false,
+			vaultLoadIssue: null,
 		},
 		"body",
 	);
@@ -314,6 +341,7 @@ test("TotpManagerViewRenderer preserves the search input node across non-destruc
 		isVaultInitialized: true,
 		showFloatingLockButton: true,
 		showUpcomingCodes: false,
+		vaultLoadIssue: null,
 	} satisfies Parameters<TotpManagerViewRenderer["render"]>[1];
 
 	harness.renderer.render(harness.root as unknown as HTMLElement, context);
@@ -362,6 +390,7 @@ test("TotpManagerViewRenderer still renders entries when the floating lock butto
 		isVaultInitialized: true,
 		showFloatingLockButton: false,
 		showUpcomingCodes: false,
+		vaultLoadIssue: null,
 	});
 
 	assert.ok(harness.root.findByClass("twofa-command-dock"));
@@ -388,6 +417,7 @@ test("TotpManagerViewRenderer renders entry cards with selection semantics and n
 		isVaultInitialized: true,
 		showFloatingLockButton: false,
 		showUpcomingCodes: true,
+		vaultLoadIssue: null,
 	});
 
 	const card = harness.root.findByClass("twofa-entry-card");

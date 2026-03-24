@@ -2,8 +2,8 @@
 	"id": "obsidian-2fa-management",
 	"name": "2FA Management",
 	"version": "1.0.0",
-	"minAppVersion": "1.5.12",
+	"minAppVersion": "1.8.7",
 	"description": "Manage encrypted local TOTP 2FA accounts from an Obsidian sidebar.",
 	"author": "zhutongqing",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }

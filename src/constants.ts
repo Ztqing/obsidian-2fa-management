@@ -10,6 +10,8 @@ export const PBKDF2_HASH = "SHA-256";
 export const ENCRYPTION_KEY_LENGTH = 256;
 export const ENCRYPTION_SALT_BYTES = 16;
 export const ENCRYPTION_IV_BYTES = 12;
+export const QR_IMPORT_MAX_DIMENSION = 2_048;
+export const QR_IMPORT_MAX_PIXELS = 1_048_576;
 
 export const DEFAULT_TOTP_ENTRY: TotpEntryDraft = {
 	issuer: "",

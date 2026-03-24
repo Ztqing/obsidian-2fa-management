@@ -1,6 +1,6 @@
 import { setIcon } from "obsidian";
 import type TwoFactorManagementPlugin from "../../plugin";
-import type { TotpEntryRecord } from "../../types";
+import type { TotpEntryRecord, VaultLoadIssue } from "../../types";
 import { TotpManagerEntryCardRenderer } from "./totp-manager-entry-card-renderer";
 import type { TotpCodeRefreshController } from "./totp-manager-view-code-refresh";
 import type { TotpManagerViewState } from "./totp-manager-view-state";
@@ -30,6 +30,7 @@ export interface TotpManagerViewRendererActions {
 		card: HTMLElement,
 		event: PointerEvent,
 	) => void;
+	onClearVault: () => void;
 	onCreateVault: () => void;
 	onDeleteSelected: () => void;
 	onExitSelectionMode: () => void;
@@ -45,6 +46,7 @@ export interface TotpManagerViewRenderContext {
 	isVaultInitialized: boolean;
 	showUpcomingCodes: boolean;
 	showFloatingLockButton: boolean;
+	vaultLoadIssue: VaultLoadIssue | null;
 }
 
 export interface TotpManagerViewRendererDependencies {
@@ -52,7 +54,7 @@ export interface TotpManagerViewRendererDependencies {
 	setUiIcon?: (element: HTMLElement, icon: string) => void;
 }
 
-type ViewAvailabilityState = "locked" | "ready" | "uninitialized";
+type ViewAvailabilityState = "load-error" | "locked" | "ready" | "uninitialized";
 
 export interface TotpManagerViewRenderResult {
 	shouldRefreshVisibleCodes: boolean;
@@ -144,6 +146,10 @@ export class TotpManagerViewRenderer {
 	private getAvailabilityState(
 		context: TotpManagerViewRenderContext,
 	): ViewAvailabilityState {
+		if (context.vaultLoadIssue !== null) {
+			return "load-error";
+		}
+
 		if (!context.isVaultInitialized) {
 			return "uninitialized";
 		}
@@ -180,6 +186,10 @@ export class TotpManagerViewRenderer {
 	}
 
 	private getDockStatusText(availability: ViewAvailabilityState): string {
+		if (availability === "load-error") {
+			return this.plugin.t("view.loadError.title");
+		}
+
 		if (availability === "uninitialized") {
 			return this.plugin.t("view.uninitialized.title");
 		}
@@ -278,6 +288,11 @@ export class TotpManagerViewRenderer {
 		this.bodyEl.empty();
 		this.renderedCards.clear();
 
+		if (availability === "load-error") {
+			this.renderLoadErrorState(this.bodyEl);
+			return;
+		}
+
 		if (availability === "uninitialized") {
 			this.renderUninitializedState(this.bodyEl);
 			return;
@@ -289,6 +304,28 @@ export class TotpManagerViewRenderer {
 		}
 
 		this.renderUnlockedState(this.bodyEl, showUpcomingCodes);
+	}
+
+	private renderLoadErrorState(contentEl: HTMLElement): void {
+		const wrapper = contentEl.createDiv({
+			cls: "twofa-state-panel",
+		});
+		wrapper.createEl("h3", {
+			text: this.plugin.t("view.loadError.title"),
+		});
+		wrapper.createEl("p", {
+			text: this.plugin.t("view.loadError.description"),
+		});
+		const actions = wrapper.createDiv({
+			cls: "twofa-inline-actions",
+		});
+		const clearButton = actions.createEl("button", {
+			cls: "mod-warning",
+			text: this.plugin.t("common.clearVault"),
+		});
+		clearButton.addEventListener("click", () => {
+			this.actions.onClearVault();
+		});
 	}
 
 	private renderUninitializedState(contentEl: HTMLElement): void {

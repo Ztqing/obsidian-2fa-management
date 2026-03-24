@@ -68,6 +68,7 @@ function createControllerHarness(options: {
 	} | null = null;
 
 	const environment = {
+		confirmAndResetVault: async () => true,
 		confirmAndDeleteEntries: async (selectedEntries: readonly TotpEntryRecord[]) => {
 			callLog.push(
 				`deleteEntries:${selectedEntries.map((entry) => entry.id).join(",")}`,

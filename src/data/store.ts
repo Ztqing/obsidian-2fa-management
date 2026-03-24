@@ -5,6 +5,7 @@ import {
 	MAX_TOTP_PERIOD,
 	MIN_TOTP_DIGITS,
 	MIN_TOTP_PERIOD,
+	PLUGIN_DATA_SCHEMA_VERSION,
 	VAULT_DATA_VERSION,
 } from "../constants";
 import { createUserError } from "../errors";
@@ -16,6 +17,7 @@ import type {
 	PreferredSide,
 	TotpEntryDraft,
 	TotpEntryRecord,
+	VaultLoadIssue,
 } from "../types";
 
 const collator = new Intl.Collator(undefined, {
@@ -75,43 +77,84 @@ export function isEncryptedVaultData(value: unknown): value is EncryptedVaultDat
 	);
 }
 
-export function normalizePluginData(value: unknown): PluginData {
+function resolveVaultLoadIssue(value: unknown): VaultLoadIssue | null {
+	if (!isRecord(value)) {
+		return null;
+	}
+
+	if (
+		typeof value.schemaVersion === "number" &&
+		value.schemaVersion !== PLUGIN_DATA_SCHEMA_VERSION
+	) {
+		return "unsupported_version";
+	}
+
+	if (value.vault === null || typeof value.vault === "undefined") {
+		return null;
+	}
+
+	if (isRecord(value.vault) && typeof value.vault.version === "number") {
+		return value.vault.version === VAULT_DATA_VERSION
+			? (isEncryptedVaultData(value.vault) ? null : "corrupted")
+			: "unsupported_version";
+	}
+
+	return "corrupted";
+}
+
+export function normalizePluginDataWithIssues(value: unknown): {
+	pluginData: PluginData;
+	vaultLoadIssue: VaultLoadIssue | null;
+} {
+	const vaultLoadIssue = resolveVaultLoadIssue(value);
+
 	if (!isRecord(value)) {
 		return {
-			schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
-			vaultRevision: DEFAULT_PLUGIN_DATA.vaultRevision,
-			vault: DEFAULT_PLUGIN_DATA.vault,
-			settings: {
-				preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
-				showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
-				showFloatingLockButton:
-					DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
+			pluginData: {
+				schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+				vaultRevision: DEFAULT_PLUGIN_DATA.vaultRevision,
+				vault: DEFAULT_PLUGIN_DATA.vault,
+				settings: {
+					preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
+					showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+					showFloatingLockButton:
+						DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
+				},
 			},
+			vaultLoadIssue,
 		};
 	}
 
 	const rawSettings = isRecord(value.settings) ? value.settings : {};
-	const vault = isEncryptedVaultData(value.vault) ? value.vault : null;
+	const vault =
+		vaultLoadIssue === null && isEncryptedVaultData(value.vault) ? value.vault : null;
 
 	return {
-		schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
-		vaultRevision: normalizeNonNegativeInteger(
-			value.vaultRevision,
-			DEFAULT_PLUGIN_DATA.vaultRevision,
-		),
-		vault,
-		settings: {
-			preferredSide: normalizePreferredSide(rawSettings.preferredSide),
-			showUpcomingCodes: normalizeBoolean(
-				rawSettings.showUpcomingCodes,
-				DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+		pluginData: {
+			schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+			vaultRevision: normalizeNonNegativeInteger(
+				value.vaultRevision,
+				DEFAULT_PLUGIN_DATA.vaultRevision,
 			),
-			showFloatingLockButton: normalizeBoolean(
-				rawSettings.showFloatingLockButton,
-				DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
-			),
+			vault,
+			settings: {
+				preferredSide: normalizePreferredSide(rawSettings.preferredSide),
+				showUpcomingCodes: normalizeBoolean(
+					rawSettings.showUpcomingCodes,
+					DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
+				),
+				showFloatingLockButton: normalizeBoolean(
+					rawSettings.showFloatingLockButton,
+					DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
+				),
+			},
 		},
+		vaultLoadIssue,
 	};
+}
+
+export function normalizePluginData(value: unknown): PluginData {
+	return normalizePluginDataWithIssues(value).pluginData;
 }
 
 export function normalizeTotpEntryDraft(value: TotpEntryDraft): TotpEntryDraft {
