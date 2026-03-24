@@ -4,11 +4,6 @@
   <p><a href="README.md">English</a> | 中文 | <a href="CHANGELOG.md">Changelog</a></p>
 </div>
 
----
-
-2FA Management 是一个 Obsidian 社区插件，用于在你的库中本地保存并生成 TOTP 双重验证验证码。
-当前版本以桌面端为主，正式支持目标为 Obsidian Desktop。
-
 ## 功能简介
 
 - 将 TOTP 密钥保存在 Obsidian 插件数据中。
