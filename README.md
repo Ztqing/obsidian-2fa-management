@@ -1,6 +1,10 @@
-# 2FA Management
+<div align="center">
+  <h1>2FA Management</h1>
+  <p><strong>A local-first Obsidian plugin for storing and generating encrypted TOTP codes.</strong></p>
+  <p>English | <a href="README_ZH.md">中文</a> | <a href="CHANGELOG.md">Changelog</a></p>
+</div>
 
-English | [中文](README_ZH.md) | [Changelog](CHANGELOG.md)
+<hr>
 
 2FA Management is an Obsidian community plugin for storing and generating TOTP codes inside your vault.
 This release is desktop-first and currently targets Obsidian Desktop.

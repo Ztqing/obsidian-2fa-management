@@ -1,6 +1,10 @@
-# 2FA Management
+<div align="center">
+  <h1>2FA Management</h1>
+  <p><strong>一个本地优先的 Obsidian 插件，用于安全保存并生成加密的 TOTP 验证码。</strong></p>
+  <p><a href="README.md">English</a> | 中文 | <a href="CHANGELOG.md">Changelog</a></p>
+</div>
 
-[English](README.md) | 中文 | [Changelog](CHANGELOG.md)
+<hr>
 
 2FA Management 是一个 Obsidian 社区插件，用于在你的库中本地保存并生成 TOTP 双重验证验证码。
 当前版本以桌面端为主，正式支持目标为 Obsidian Desktop。
