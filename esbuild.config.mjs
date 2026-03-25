@@ -1,6 +1,5 @@
 import esbuild from "esbuild";
-import process from "process";
-import { builtinModules } from 'node:module';
+import { builtinModules } from "node:module";
 
 const banner =
 `/*
@@ -9,9 +8,9 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
+const prod = process.argv[2] === "production";
 
-const context = await esbuild.context({
+const buildOptions = {
 	banner: {
 		js: banner,
 	},
@@ -20,18 +19,8 @@ const context = await esbuild.context({
 	external: [
 		"obsidian",
 		"electron",
-		"@codemirror/autocomplete",
-		"@codemirror/collab",
-		"@codemirror/commands",
-		"@codemirror/language",
-		"@codemirror/lint",
-		"@codemirror/search",
-		"@codemirror/state",
-		"@codemirror/view",
-		"@lezer/common",
-		"@lezer/highlight",
-		"@lezer/lr",
-		...builtinModules],
+		...builtinModules,
+	],
 	format: "cjs",
 	target: "es2018",
 	logLevel: "info",
@@ -39,11 +28,12 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
-});
+};
 
 if (prod) {
-	await context.rebuild();
+	await esbuild.build(buildOptions);
 	process.exit(0);
 } else {
+	const context = await esbuild.context(buildOptions);
 	await context.watch();
 }

@@ -1,105 +1,102 @@
-import { DEFAULT_PLUGIN_DATA } from "../constants";
 import {
 	getNextTotpSortOrder,
-	normalizePluginDataWithIssues,
 	normalizeTotpEntryDraft,
-	reindexTotpEntries,
 } from "../data/store";
 import { createUserError } from "../errors";
 import { applyBulkOtpauthImportPreview } from "../import/bulk-otpauth";
-import { decryptVaultEntries, encryptVaultEntries } from "../security/crypto";
+import { decryptVaultEntries } from "../security/crypto";
 import type {
 	BulkOtpauthImportCommitResult,
 	BulkOtpauthImportSubmission,
 	PluginData,
-	PluginSettings,
 	PreferredSide,
 	TotpEntryDraft,
 	TotpEntryRecord,
 	VaultLoadIssue,
 } from "../types";
+import { EncryptedVaultManager } from "./encrypted-vault-manager";
+import { VaultRepository, type VaultRepositoryDependencies } from "./repository";
+import { VaultSession } from "./session";
 
-export interface TwoFactorVaultServiceDependencies {
+export interface TwoFactorVaultServiceDependencies extends VaultRepositoryDependencies {
 	createId: () => string;
-	loadData: () => Promise<unknown>;
-	saveData: (data: PluginData) => Promise<void>;
 }
 
 export class TwoFactorVaultService {
-	private pluginData: PluginData = DEFAULT_PLUGIN_DATA;
-	private unlockedEntries: TotpEntryRecord[] | null = null;
-	private sessionPassword: string | null = null;
-	private vaultLoadIssue: VaultLoadIssue | null = null;
+	private readonly repository: VaultRepository;
+	private readonly session = new VaultSession();
+	private readonly encryptedVaultManager: EncryptedVaultManager;
 	private writeQueue: Promise<void> = Promise.resolve();
-	private sessionToken = 0;
 
-	constructor(private readonly dependencies: TwoFactorVaultServiceDependencies) {}
+	constructor(private readonly dependencies: TwoFactorVaultServiceDependencies) {
+		this.repository = new VaultRepository(dependencies);
+		this.encryptedVaultManager = new EncryptedVaultManager(
+			this.repository,
+			this.session,
+		);
+	}
 
 	async load(): Promise<void> {
 		await this.writeQueue;
-		const { pluginData, vaultLoadIssue } = normalizePluginDataWithIssues(
-			await this.dependencies.loadData(),
-		);
-		this.pluginData = pluginData;
-		this.vaultLoadIssue = vaultLoadIssue;
-		this.clearUnlockedState();
+		await this.repository.load();
+		this.session.clear();
 	}
 
 	isVaultInitialized(): boolean {
-		return this.vaultLoadIssue === null && this.pluginData.vault !== null;
+		return this.repository.isVaultInitialized();
 	}
 
 	isUnlocked(): boolean {
-		return this.unlockedEntries !== null;
+		return this.session.isUnlocked();
 	}
 
 	hasVaultLoadIssue(): boolean {
-		return this.vaultLoadIssue !== null;
+		return this.repository.getVaultLoadIssue() !== null;
 	}
 
 	getVaultLoadIssue(): VaultLoadIssue | null {
-		return this.vaultLoadIssue;
+		return this.repository.getVaultLoadIssue();
 	}
 
 	getEntries(): TotpEntryRecord[] {
-		return this.unlockedEntries ? [...this.unlockedEntries] : [];
+		return this.session.getEntries();
 	}
 
 	getVaultRevision(): number {
-		return this.pluginData.vaultRevision;
+		return this.repository.getVaultRevision();
 	}
 
 	getPreferredSide(): PreferredSide {
-		return this.pluginData.settings.preferredSide;
+		return this.repository.getPreferredSide();
 	}
 
 	async setPreferredSide(side: PreferredSide): Promise<void> {
 		await this.enqueueWrite(async () => {
-			await this.persistSettings({
+			await this.repository.persistSettings({
 				preferredSide: side,
 			});
 		});
 	}
 
 	shouldShowUpcomingCodes(): boolean {
-		return this.pluginData.settings.showUpcomingCodes;
+		return this.repository.shouldShowUpcomingCodes();
 	}
 
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
 		await this.enqueueWrite(async () => {
-			await this.persistSettings({
+			await this.repository.persistSettings({
 				showUpcomingCodes: value,
 			});
 		});
 	}
 
 	shouldShowFloatingLockButton(): boolean {
-		return this.pluginData.settings.showFloatingLockButton;
+		return this.repository.shouldShowFloatingLockButton();
 	}
 
 	async setShowFloatingLockButton(value: boolean): Promise<void> {
 		await this.enqueueWrite(async () => {
-			await this.persistSettings({
+			await this.repository.persistSettings({
 				showFloatingLockButton: value,
 			});
 		});
@@ -108,57 +105,38 @@ export class TwoFactorVaultService {
 	async initializeVault(password: string): Promise<void> {
 		await this.enqueueWrite(async () => {
 			this.assertVaultCanBeCreated();
-			const nextEntries: TotpEntryRecord[] = [];
-			const nextVault = await encryptVaultEntries(nextEntries, password);
-			const nextPluginData = this.createNextPluginData({
-				bumpVaultRevision: true,
-				vault: nextVault,
-			});
-
-			await this.persistPluginData(nextPluginData);
-			this.pluginData = nextPluginData;
-			this.vaultLoadIssue = null;
-			this.beginUnlockedSession(nextEntries, password);
+			await this.encryptedVaultManager.initialize(password);
 		});
 	}
 
 	async unlockVault(password: string): Promise<void> {
 		await this.writeQueue;
 		this.assertVaultAvailable();
+		const pluginData = this.repository.getPluginData();
 
-		if (!this.pluginData.vault) {
+		if (!pluginData.vault) {
 			throw createUserError("vault_unlock_required");
 		}
 
-		const nextEntries = await decryptVaultEntries(this.pluginData.vault, password);
-		this.beginUnlockedSession(nextEntries, password);
+		const nextEntries = await decryptVaultEntries(pluginData.vault, password);
+		this.session.begin(nextEntries, password);
 	}
 
 	lockVault(): void {
-		this.clearUnlockedState();
+		this.session.clear();
 	}
 
 	async changeMasterPassword(nextPassword: string): Promise<void> {
 		await this.enqueueWrite(async () => {
-			const currentEntries = this.requireUnlockedEntries();
-			const currentSessionToken = this.sessionToken;
-			const nextVault = await encryptVaultEntries(currentEntries, nextPassword);
-			const nextPluginData = this.createNextPluginData({
-				bumpVaultRevision: true,
-				vault: nextVault,
-			});
-
-			await this.persistPluginData(nextPluginData);
-			this.pluginData = nextPluginData;
-			this.vaultLoadIssue = null;
-			this.syncUnlockedSession(currentEntries, nextPassword, currentSessionToken);
+			this.assertVaultAvailable();
+			await this.encryptedVaultManager.changeMasterPassword(nextPassword);
 		});
 	}
 
 	async addEntry(draft: TotpEntryDraft): Promise<void> {
 		await this.enqueueWrite(async () => {
 			const normalizedDraft = normalizeTotpEntryDraft(draft);
-			const currentEntries = this.requireUnlockedEntries();
+			const currentEntries = this.session.requireUnlockedEntries();
 			const nextEntries = [
 				...currentEntries,
 				{
@@ -167,7 +145,7 @@ export class TwoFactorVaultService {
 					...normalizedDraft,
 				},
 			];
-			await this.commitUnlockedEntries(nextEntries, {
+			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
 				bumpVaultRevision: true,
 			});
 		});
@@ -182,7 +160,7 @@ export class TwoFactorVaultService {
 			this.assertVaultRevision(expectedVaultRevision, "entry_changed_during_edit");
 
 			const normalizedDraft = normalizeTotpEntryDraft(draft);
-			const currentEntries = this.requireUnlockedEntries();
+			const currentEntries = this.session.requireUnlockedEntries();
 			const existingEntry = currentEntries.find((entry) => entry.id === entryId);
 
 			if (!existingEntry) {
@@ -201,7 +179,7 @@ export class TwoFactorVaultService {
 				};
 			});
 
-			await this.commitUnlockedEntries(nextEntries, {
+			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
 				bumpVaultRevision: true,
 			});
 		});
@@ -209,8 +187,10 @@ export class TwoFactorVaultService {
 
 	async deleteEntry(entryId: string): Promise<void> {
 		await this.enqueueWrite(async () => {
-			const nextEntries = this.requireUnlockedEntries().filter((entry) => entry.id !== entryId);
-			await this.commitUnlockedEntries(nextEntries, {
+			const nextEntries = this.session
+				.requireUnlockedEntries()
+				.filter((entry) => entry.id !== entryId);
+			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
 				bumpVaultRevision: true,
 			});
 		});
@@ -219,10 +199,10 @@ export class TwoFactorVaultService {
 	async deleteEntries(entryIds: readonly string[]): Promise<void> {
 		await this.enqueueWrite(async () => {
 			const idsToDelete = new Set(entryIds);
-			const nextEntries = this.requireUnlockedEntries().filter(
-				(entry) => !idsToDelete.has(entry.id),
-			);
-			await this.commitUnlockedEntries(nextEntries, {
+			const nextEntries = this.session
+				.requireUnlockedEntries()
+				.filter((entry) => !idsToDelete.has(entry.id));
+			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
 				bumpVaultRevision: true,
 			});
 		});
@@ -230,7 +210,7 @@ export class TwoFactorVaultService {
 
 	async reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void> {
 		await this.enqueueWrite(async () => {
-			const currentEntries = this.requireUnlockedEntries();
+			const currentEntries = this.session.requireUnlockedEntries();
 			const entriesById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
 			const seenIds = new Set<string>();
 			const nextEntries: TotpEntryRecord[] = [];
@@ -254,7 +234,7 @@ export class TwoFactorVaultService {
 				nextEntries.push(entry);
 			}
 
-			await this.commitUnlockedEntries(nextEntries, {
+			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
 				bumpVaultRevision: true,
 			});
 		});
@@ -270,7 +250,7 @@ export class TwoFactorVaultService {
 			);
 
 			const commitResult = applyBulkOtpauthImportPreview(submission.preview, {
-				existingEntries: this.requireUnlockedEntries(),
+				existingEntries: this.session.requireUnlockedEntries(),
 				selectedDuplicateLineNumbers: [...submission.selectedDuplicateLineNumbers],
 				createId: () => this.dependencies.createId(),
 			});
@@ -282,7 +262,7 @@ export class TwoFactorVaultService {
 				return commitResult;
 			}
 
-			await this.commitUnlockedEntries(commitResult.nextEntries, {
+			await this.encryptedVaultManager.commitUnlockedEntries(commitResult.nextEntries, {
 				bumpVaultRevision: true,
 			});
 			return commitResult;
@@ -291,37 +271,8 @@ export class TwoFactorVaultService {
 
 	async resetVault(): Promise<void> {
 		await this.enqueueWrite(async () => {
-			const nextPluginData = this.createNextPluginData({
-				bumpVaultRevision:
-					this.pluginData.vault !== null || (this.unlockedEntries?.length ?? 0) > 0,
-				vault: null,
-			});
-
-			await this.persistPluginData(nextPluginData);
-			this.pluginData = nextPluginData;
-			this.vaultLoadIssue = null;
-			this.clearUnlockedState();
+			await this.encryptedVaultManager.resetVault();
 		});
-	}
-
-	private requireUnlockedEntries(): TotpEntryRecord[] {
-		this.assertVaultAvailable();
-
-		if (!this.unlockedEntries || !this.sessionPassword) {
-			throw createUserError("vault_unlock_required");
-		}
-
-		return [...this.unlockedEntries];
-	}
-
-	private requireSessionPassword(): string {
-		this.assertVaultAvailable();
-
-		if (!this.sessionPassword) {
-			throw createUserError("vault_unlock_required");
-		}
-
-		return this.sessionPassword;
 	}
 
 	private assertVaultRevision(
@@ -330,100 +281,21 @@ export class TwoFactorVaultService {
 	): void {
 		this.assertVaultAvailable();
 
-		if (expectedVaultRevision !== this.pluginData.vaultRevision) {
+		if (expectedVaultRevision !== this.repository.getVaultRevision()) {
 			throw createUserError(errorCode);
 		}
 	}
 
 	private assertVaultAvailable(): void {
-		if (this.vaultLoadIssue !== null) {
+		if (this.repository.getVaultLoadIssue() !== null) {
 			throw createUserError("vault_repair_required");
 		}
 	}
 
 	private assertVaultCanBeCreated(): void {
-		if (this.vaultLoadIssue !== null) {
+		if (this.repository.getVaultLoadIssue() !== null) {
 			throw createUserError("vault_repair_required");
 		}
-	}
-
-	private async commitUnlockedEntries(
-		entries: TotpEntryRecord[],
-		options: {
-			bumpVaultRevision: boolean;
-			nextPassword?: string;
-		},
-	): Promise<void> {
-		const nextEntries = reindexTotpEntries(entries);
-		const currentSessionToken = this.sessionToken;
-		const nextPassword = options.nextPassword ?? this.requireSessionPassword();
-		const nextVault = await encryptVaultEntries(nextEntries, nextPassword);
-		const nextPluginData = this.createNextPluginData({
-			bumpVaultRevision: options.bumpVaultRevision,
-			vault: nextVault,
-		});
-
-		await this.persistPluginData(nextPluginData);
-		this.pluginData = nextPluginData;
-		this.vaultLoadIssue = null;
-		this.syncUnlockedSession(nextEntries, nextPassword, currentSessionToken);
-	}
-
-	private createNextPluginData(options: {
-		bumpVaultRevision?: boolean;
-		settings?: PluginSettings;
-		vault?: PluginData["vault"];
-	}): PluginData {
-		return {
-			...this.pluginData,
-			settings: options.settings ?? this.pluginData.settings,
-			vault:
-				typeof options.vault === "undefined" ? this.pluginData.vault : options.vault,
-			vaultRevision: options.bumpVaultRevision
-				? this.pluginData.vaultRevision + 1
-				: this.pluginData.vaultRevision,
-		};
-	}
-
-	private async persistSettings(nextSettings: Partial<PluginSettings>): Promise<void> {
-		const nextPluginData = this.createNextPluginData({
-			settings: {
-				...this.pluginData.settings,
-				...nextSettings,
-			},
-		});
-
-		await this.persistPluginData(nextPluginData);
-		this.pluginData = nextPluginData;
-	}
-
-	private beginUnlockedSession(entries: TotpEntryRecord[], password: string): void {
-		this.sessionToken += 1;
-		this.unlockedEntries = [...entries];
-		this.sessionPassword = password;
-	}
-
-	private syncUnlockedSession(
-		entries: TotpEntryRecord[],
-		password: string,
-		expectedSessionToken: number,
-	): void {
-		if (this.sessionToken !== expectedSessionToken) {
-			return;
-		}
-
-		this.unlockedEntries = [...entries];
-		this.sessionPassword = password;
-	}
-
-	private clearUnlockedState(): void {
-		this.sessionToken += 1;
-		this.unlockedEntries = null;
-		this.sessionPassword = null;
-	}
-
-	private async persistPluginData(data: PluginData): Promise<void> {
-		await this.dependencies.saveData(data);
 	}
 
 	private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {

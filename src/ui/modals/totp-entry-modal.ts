@@ -1,29 +1,20 @@
 import {
-	DropdownComponent,
 	Modal,
-	Notice,
 	Setting,
 	TextAreaComponent,
-	TextComponent,
 } from "obsidian";
 import { DEFAULT_TOTP_ENTRY } from "../../constants";
 import { normalizeTotpEntryDraft } from "../../data/store";
 import { serializeOtpauthUri } from "../../totp/otpauth";
-import type { TotpAlgorithm, TotpEntryDraft } from "../../types";
+import type { TotpEntryDraft } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
-import {
-	TotpEntryImportSurfaceController,
-	evaluateTotpEntryUriInput,
-	importDraftFromQrImage,
-	importDraftFromUri,
-	type TotpEntryImportResult,
-} from "./totp-entry-modal-controller";
+import { TotpEntryImportSurfaceController } from "./totp-entry-modal-controller";
 import {
 	extractImageFileFromDataTransfer,
 	extractImageFileFromItems,
-	getChangedDraftFields,
-	type TotpEntryDraftField,
 } from "./totp-entry-import";
+import { createTotpEntryForm, type TotpEntryForm } from "./totp-entry-form";
+import { TotpEntryImportPresenter } from "./totp-entry-import-presenter";
 
 class TotpEntryModal extends Modal {
 	private readonly plugin: TwoFactorManagementPlugin;
@@ -31,19 +22,13 @@ class TotpEntryModal extends Modal {
 	private readonly resolve: (draft: TotpEntryDraft | null) => void;
 	private settled = false;
 	private uriInput: TextAreaComponent | null = null;
-	private issuerInput: TextComponent | null = null;
-	private accountNameInput: TextComponent | null = null;
-	private secretInput: TextComponent | null = null;
-	private digitsInput: TextComponent | null = null;
-	private periodInput: TextComponent | null = null;
-	private algorithmInput: DropdownComponent | null = null;
 	private statusEl: HTMLElement | null = null;
 	private fileInput: HTMLInputElement | null = null;
 	private readonly isEditing: boolean;
-	private readonly fieldElements: Partial<Record<TotpEntryDraftField, HTMLElement>> = {};
 	private importSurfaceEl: HTMLElement | null = null;
-	private importHighlightTimeout: number | null = null;
 	private readonly importSurfaceState = new TotpEntryImportSurfaceController();
+	private form: TotpEntryForm | null = null;
+	private importPresenter: TotpEntryImportPresenter | null = null;
 
 	constructor(
 		plugin: TwoFactorManagementPlugin,
@@ -113,85 +98,30 @@ class TotpEntryModal extends Modal {
 			});
 		linkSetting.settingEl.addClass("twofa-entry-modal__link-setting");
 
-		const detailsSection = this.contentEl.createDiv({
-			cls: "twofa-entry-modal__section twofa-entry-modal__section--details",
-		});
-		detailsSection.createEl("h4", {
-			cls: "twofa-entry-modal__section-title",
-			text: this.plugin.t("modal.entry.detailsSection"),
-		});
-
-		const issuerSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.issuer.name"))
-			.setDesc(this.plugin.t("modal.entry.issuer.description"))
-			.addText((text) => {
-				this.issuerInput = text;
-				text.inputEl.placeholder = this.plugin.t("modal.entry.issuer.placeholder");
-				text.setValue(this.initialDraft.issuer);
-			});
-		this.fieldElements.issuer = this.issuerInput?.inputEl ?? issuerSetting.settingEl;
-
-		const accountNameSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.accountName.name"))
-			.setDesc(this.plugin.t("modal.entry.accountName.description"))
-			.addText((text) => {
-				this.accountNameInput = text;
-				text.inputEl.placeholder = this.plugin.t("modal.entry.accountName.placeholder");
-				text.setValue(this.initialDraft.accountName);
-			});
-		this.fieldElements.accountName =
-			this.accountNameInput?.inputEl ?? accountNameSetting.settingEl;
-
-		const secretSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.secret.name"))
-			.setDesc(this.plugin.t("modal.entry.secret.description"))
-			.addText((text) => {
-				this.secretInput = text;
-				text.inputEl.type = "password";
-				text.inputEl.placeholder = this.plugin.t("modal.entry.secret.placeholder");
-				text.inputEl.autocomplete = "off";
-				text.setValue(this.initialDraft.secret);
-			});
-		this.fieldElements.secret = this.secretInput?.inputEl ?? secretSetting.settingEl;
-
-		const algorithmSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.algorithm.name"))
-			.setDesc(this.plugin.t("modal.entry.algorithm.description"))
-			.addDropdown((dropdown) => {
-				this.algorithmInput = dropdown;
-				dropdown.addOptions({
-					"SHA-1": "SHA-1",
-					"SHA-256": "SHA-256",
-					"SHA-512": "SHA-512",
-				});
-				dropdown.setValue(this.initialDraft.algorithm);
-			});
-		this.fieldElements.algorithm =
-			this.algorithmInput?.selectEl ?? algorithmSetting.settingEl;
-
-		const digitsSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.digits.name"))
-			.setDesc(this.plugin.t("modal.entry.digits.description"))
-			.addText((text) => {
-				this.digitsInput = text;
-				text.inputEl.type = "number";
-				text.inputEl.min = "6";
-				text.inputEl.max = "10";
-				text.setValue(String(this.initialDraft.digits));
-			});
-		this.fieldElements.digits = this.digitsInput?.inputEl ?? digitsSetting.settingEl;
-
-		const periodSetting = new Setting(detailsSection)
-			.setName(this.plugin.t("modal.entry.period.name"))
-			.setDesc(this.plugin.t("modal.entry.period.description"))
-			.addText((text) => {
-				this.periodInput = text;
-				text.inputEl.type = "number";
-				text.inputEl.min = "1";
-				text.inputEl.max = "300";
-				text.setValue(String(this.initialDraft.period));
-			});
-		this.fieldElements.period = this.periodInput?.inputEl ?? periodSetting.settingEl;
+		this.form = createTotpEntryForm(this.plugin, this.contentEl, this.initialDraft);
+		this.importPresenter = new TotpEntryImportPresenter(
+			{
+				applyDraft: (draft) => {
+					this.form?.applyDraft(draft);
+				},
+				clearImportSurfaceState: () => {
+					this.clearImportSurfaceState();
+				},
+				getErrorMessage: (error) => this.getErrorMessage(error),
+				readDraft: () => this.readDraftFromInputs(),
+				setStatus: (message, isError) => {
+					this.setStatus(message, isError);
+				},
+				setUriValue: (value) => {
+					this.uriInput?.setValue(value);
+				},
+				showNotice: (message) => {
+					this.plugin.showNotice(message);
+				},
+				t: (key, variables = {}) => this.plugin.t(key, variables),
+			},
+			this.form.getFieldElements(),
+		);
 
 		this.modalEl.addEventListener("paste", (event) => {
 			void this.handlePaste(event);
@@ -230,16 +160,13 @@ class TotpEntryModal extends Modal {
 		});
 
 		window.setTimeout(() => {
-			this.accountNameInput?.inputEl.focus();
+			this.form?.focusPrimaryField();
 		}, 0);
 	}
 
 	onClose(): void {
 		this.contentEl.empty();
-		if (this.importHighlightTimeout !== null) {
-			window.clearTimeout(this.importHighlightTimeout);
-			this.importHighlightTimeout = null;
-		}
+		this.importPresenter?.destroy();
 		this.importSurfaceState.reset();
 
 		if (!this.settled) {
@@ -248,23 +175,9 @@ class TotpEntryModal extends Modal {
 	}
 
 	private readDraftFromInputs(): TotpEntryDraft {
-		return {
-			issuer: this.issuerInput?.getValue() ?? "",
-			accountName: this.accountNameInput?.getValue() ?? "",
-			secret: this.secretInput?.getValue() ?? "",
-			algorithm: (this.algorithmInput?.getValue() ?? DEFAULT_TOTP_ENTRY.algorithm) as TotpAlgorithm,
-			digits: Number(this.digitsInput?.getValue() ?? DEFAULT_TOTP_ENTRY.digits),
-			period: Number(this.periodInput?.getValue() ?? DEFAULT_TOTP_ENTRY.period),
+		return this.form?.readDraft() ?? {
+			...DEFAULT_TOTP_ENTRY,
 		};
-	}
-
-	private applyDraft(draft: TotpEntryDraft): void {
-		this.issuerInput?.setValue(draft.issuer);
-		this.accountNameInput?.setValue(draft.accountName);
-		this.secretInput?.setValue(draft.secret);
-		this.algorithmInput?.setValue(draft.algorithm);
-		this.digitsInput?.setValue(String(draft.digits));
-		this.periodInput?.setValue(String(draft.period));
 	}
 
 	private renderImportSurface(containerEl: HTMLElement): void {
@@ -301,56 +214,18 @@ class TotpEntryModal extends Modal {
 	}
 
 	private maybeParseUri(value: string): void {
-		const uriState = evaluateTotpEntryUriInput(value);
-
-		if (uriState.kind === "ignore") {
-			this.setStatus("", false);
-			return;
-		}
-
-		if (uriState.kind === "partial") {
-			this.setStatus(this.plugin.t(uriState.statusKey), false);
-			return;
-		}
-
-		const result = importDraftFromUri(this.readDraftFromInputs(), uriState.value, {
-			dependencies: {
-				formatErrorMessage: (error) => this.getErrorMessage(error),
-				getChangedDraftFields,
-			},
-			showSuccessNotice: false,
-		});
-		this.applyImportResult(result);
+		this.importPresenter?.maybeParseUri(value);
 	}
 
 	private importFromUri(value: string, showSuccess = true): void {
-		const result = importDraftFromUri(this.readDraftFromInputs(), value, {
-			dependencies: {
-				formatErrorMessage: (error) => this.getErrorMessage(error),
-				getChangedDraftFields,
-			},
-			showSuccessNotice: showSuccess,
-		});
-		this.applyImportResult(result);
+		this.importPresenter?.importFromUri(value, showSuccess);
 	}
 
 	private async importQrImage(
 		file: Blob,
 		source: "clipboard" | "drop" | "picker" = "picker",
 	): Promise<void> {
-		this.setStatus(this.plugin.t("modal.entry.status.readingImage"), false);
-		const result = await importDraftFromQrImage(
-			this.readDraftFromInputs(),
-			file,
-			source,
-			{
-				dependencies: {
-					formatErrorMessage: (error) => this.getErrorMessage(error),
-					getChangedDraftFields,
-				},
-			},
-		);
-		this.applyImportResult(result);
+		await this.importPresenter?.importQrImage(file, source);
 	}
 
 	private async handlePaste(event: ClipboardEvent): Promise<void> {
@@ -444,47 +319,12 @@ class TotpEntryModal extends Modal {
 		this.statusEl.toggleClass("is-success", !isError && message.length > 0);
 	}
 
-	private highlightChangedFields(previous: TotpEntryDraft, next: TotpEntryDraft): void {
-		this.highlightFields(getChangedDraftFields(previous, next));
-	}
-
-	private clearImportHighlights(): void {
-		if (this.importHighlightTimeout !== null) {
-			window.clearTimeout(this.importHighlightTimeout);
-			this.importHighlightTimeout = null;
-		}
-
-		for (const element of Object.values(this.fieldElements)) {
-			element?.removeClass("twofa-import-highlight");
-		}
-	}
-
 	private setImportSurfaceState(stateClassName: string): void {
 		this.importSurfaceEl?.addClass(stateClassName);
 	}
 
 	private clearImportSurfaceState(): void {
 		this.importSurfaceEl?.removeClass("is-active");
-	}
-
-	private applyImportResult(result: TotpEntryImportResult): void {
-		if (result.kind === "error") {
-			if (result.clearImportSurface) {
-				this.clearImportSurfaceState();
-			}
-			this.setStatus(result.message, true);
-			return;
-		}
-
-		if (result.uri) {
-			this.uriInput?.setValue(result.uri);
-		}
-		this.applyDraft(result.draft);
-		this.highlightFields(result.changedFields);
-		this.setStatus(this.plugin.t(result.statusKey), false);
-		if (result.noticeKey) {
-			new Notice(this.plugin.t(result.noticeKey));
-		}
 	}
 
 	private syncImportSurfaceState(isActive: boolean): void {
@@ -494,23 +334,6 @@ class TotpEntryModal extends Modal {
 		}
 
 		this.clearImportSurfaceState();
-	}
-
-	private highlightFields(changedFields: readonly TotpEntryDraftField[]): void {
-		this.clearImportSurfaceState();
-		this.clearImportHighlights();
-
-		if (changedFields.length === 0) {
-			return;
-		}
-
-		for (const field of changedFields) {
-			this.fieldElements[field]?.addClass("twofa-import-highlight");
-		}
-
-		this.importHighlightTimeout = window.setTimeout(() => {
-			this.clearImportHighlights();
-		}, 1800);
 	}
 
 	private finish(draft: TotpEntryDraft | null): void {

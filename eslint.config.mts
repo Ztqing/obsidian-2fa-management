@@ -1,29 +1,22 @@
-import tseslint from 'typescript-eslint';
-import obsidianmd from "eslint-plugin-obsidianmd";
+import tseslint from "typescript-eslint";
 import globals from "globals";
 import { globalIgnores } from "eslint/config";
 
+const typedParserOptions = {
+	project: ["./tsconfig.json", "./tsconfig.tests.json"],
+	tsconfigRootDir: import.meta.dirname,
+};
+
 export default tseslint.config(
 	{
+		files: ["src/**/*.ts"],
 		languageOptions: {
 			globals: {
 				...globals.browser,
 			},
-			parserOptions: {
-				projectService: {
-					allowDefaultProject: [
-						'eslint.config.js',
-						'manifest.json'
-					]
-				},
-				tsconfigRootDir: import.meta.dirname,
-				extraFileExtensions: ['.json']
-			},
+			parser: tseslint.parser,
+			parserOptions: typedParserOptions,
 		},
-	},
-	...obsidianmd.configs.recommended,
-	{
-		files: ["src/**/*.ts"],
 		plugins: {
 			"@typescript-eslint": tseslint.plugin,
 		},
@@ -31,15 +24,33 @@ export default tseslint.config(
 			"@typescript-eslint/require-await": "error",
 		},
 	},
+	{
+		files: ["tests/**/*.ts"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+			parser: tseslint.parser,
+			parserOptions: typedParserOptions,
+		},
+	},
+	{
+		files: ["tests/index.test.mjs", "esbuild.config.mjs", "version-bump.mjs"],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+			parser: tseslint.parser,
+			parserOptions: {
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
-		"esbuild.config.mjs",
-		"eslint.config.js",
-		"version-bump.mjs",
 		"versions.json",
 		"main.js",
 		".test-dist",
-		"tests",
 	]),
 );

@@ -5,7 +5,13 @@ import { TotpManagerEntryCardRenderer } from "./totp-manager-entry-card-renderer
 import type { TotpCodeRefreshController } from "./totp-manager-view-code-refresh";
 import type { TotpManagerViewState } from "./totp-manager-view-state";
 
-export type TotpManagerViewRenderMode = "body" | "full" | "search";
+export type TotpManagerViewRenderMode =
+	| "availability"
+	| "body"
+	| "entries"
+	| "floating-lock"
+	| "full"
+	| "search";
 
 export interface TotpManagerViewRendererActions {
 	onAddEntry: () => void;
@@ -139,7 +145,8 @@ export class TotpManagerViewRenderer {
 		return {
 			shouldRefreshVisibleCodes:
 				availability === "ready" &&
-				(mode === "full" || (mode === "search" && shouldRebuildBody)),
+				((mode === "availability" || mode === "full" || mode === "entries") ||
+					(mode === "search" && shouldRebuildBody)),
 		};
 	}
 
@@ -477,7 +484,7 @@ export class TotpManagerViewRenderer {
 			return true;
 		}
 
-		if (mode === "full") {
+		if (mode === "full" || mode === "entries" || mode === "availability") {
 			return true;
 		}
 

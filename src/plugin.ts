@@ -1,11 +1,25 @@
 import { Notice, Plugin, getLanguage, type WorkspaceLeaf } from "obsidian";
-import { registerPluginCommands } from "./commands";
+import {
+	createCommandHandlers,
+	type CommandHandlers,
+} from "./application/command-handlers";
+import type { ViewInvalidationMode } from "./application/contracts";
+import { PreferencesService } from "./application/preferences-service";
+import {
+	createSettingsController,
+	type TwoFactorSettingsController,
+} from "./application/settings-controller";
+import { registerPluginCommands } from "./commands/index";
 import { OBSIDIAN_2FA_VIEW } from "./constants";
 import { USER_ERROR_TRANSLATION_KEYS, isTwoFaUserError } from "./errors";
 import { resolveUiLocale } from "./i18n/language";
 import { type TranslationKey, translateUiString } from "./i18n/translations";
-import { TwoFactorPluginActions } from "./plugin-actions";
+import {
+	TwoFactorPluginActions,
+	type TwoFactorPluginActionEnvironment,
+} from "./plugin-actions";
 import { TwoFactorSettingTab } from "./settings";
+import { clearSharedPreparedTotpEntryCache } from "./totp/totp";
 import type {
 	PreferredSide,
 	TotpEntryRecord,
@@ -19,6 +33,7 @@ import { confirmAction } from "./ui/modals/confirm-modal";
 import { promptForMasterPassword } from "./ui/modals/master-password-modal";
 import { openTotpEntryModal } from "./ui/modals/totp-entry-modal";
 import { TotpManagerView } from "./ui/views/totp-manager-view";
+import type { TotpManagerViewRenderMode } from "./ui/views/totp-manager-view-renderer";
 import { TwoFactorVaultService } from "./vault/service";
 
 export default class TwoFactorManagementPlugin extends Plugin {
@@ -32,43 +47,45 @@ export default class TwoFactorManagementPlugin extends Plugin {
 			await this.saveData(data);
 		},
 	});
-	private readonly actions = new TwoFactorPluginActions({
-		confirmAction: async (options) => confirmAction(this.app, options),
-		getErrorMessage: (error) => this.getErrorMessage(error),
-		open2FAView: async () => {
-			await this.open2FAView();
-		},
-		openBulkOtpauthImportModal: async (existingEntries, expectedVaultRevision) =>
-			openBulkOtpauthImportModal(this, existingEntries, expectedVaultRevision),
-		openTotpEntryModal: async (initialDraft) => openTotpEntryModal(this, initialDraft),
-		promptForMasterPassword: async (options) => promptForMasterPassword(this, options),
-		refreshAllViews: async () => {
-			await this.refreshAllViews();
-		},
-		service: this.vaultService,
-		showNotice: (message) => {
-			this.showNotice(message);
-		},
-		t: (key, variables = {}) => this.t(key, variables),
-	});
+
+	private readonly preferencesService = new PreferencesService(
+		this.vaultService,
+		async (mode) => this.refreshAllViews(mode),
+	);
+
+	private readonly actions = new TwoFactorPluginActions(
+		this.createPluginActionEnvironment(),
+	);
+
+	private readonly commandHandlers = createCommandHandlers(
+		this.createCommandHandlers(),
+	);
+
+	private readonly settingsController = createSettingsController(
+		this.createSettingsController(),
+	);
 
 	async onload(): Promise<void> {
 		await this.vaultService.load();
 		this.registerView(OBSIDIAN_2FA_VIEW, (leaf) => new TotpManagerView(leaf, this));
-		this.addSettingTab(new TwoFactorSettingTab(this.app, this));
-		registerPluginCommands(this);
+		this.addSettingTab(new TwoFactorSettingTab(this.app, this, this.settingsController));
+		registerPluginCommands({
+			...this.commandHandlers,
+			addCommand: this.addCommand.bind(this),
+		});
 	}
 
 	onunload(): void {
 		this.vaultService.lockVault();
+		clearSharedPreparedTotpEntryCache();
 	}
 
 	getUiLocale(): UiLocale {
 		return resolveUiLocale(getLanguage());
 	}
 
-	t(key: TranslationKey, variables: TranslationVariables = {}): string {
-		return translateUiString(this.getUiLocale(), key, variables);
+	t(key: string, variables: TranslationVariables = {}): string {
+		return translateUiString(this.getUiLocale(), key as TranslationKey, variables);
 	}
 
 	showNotice(message: string): void {
@@ -108,35 +125,33 @@ export default class TwoFactorManagementPlugin extends Plugin {
 	}
 
 	getPreferredSide(): PreferredSide {
-		return this.vaultService.getPreferredSide();
+		return this.preferencesService.getPreferredSide();
 	}
 
 	async setPreferredSide(side: PreferredSide): Promise<void> {
-		await this.vaultService.setPreferredSide(side);
+		await this.preferencesService.setPreferredSide(side);
 	}
 
 	shouldShowUpcomingCodes(): boolean {
-		return this.vaultService.shouldShowUpcomingCodes();
+		return this.preferencesService.shouldShowUpcomingCodes();
 	}
 
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
-		await this.vaultService.setShowUpcomingCodes(value);
-		await this.refreshAllViews();
+		await this.preferencesService.setShowUpcomingCodes(value);
 	}
 
 	shouldShowFloatingLockButton(): boolean {
-		return this.vaultService.shouldShowFloatingLockButton();
+		return this.preferencesService.shouldShowFloatingLockButton();
 	}
 
 	async setShowFloatingLockButton(value: boolean): Promise<void> {
-		await this.vaultService.setShowFloatingLockButton(value);
-		await this.refreshAllViews();
+		await this.preferencesService.setShowFloatingLockButton(value);
 	}
 
 	async open2FAView(): Promise<WorkspaceLeaf> {
 		const leaf = await this.app.workspace.ensureSideLeaf(
 			OBSIDIAN_2FA_VIEW,
-			this.getPreferredSide(),
+			this.preferencesService.getPreferredSide(),
 			{
 				active: true,
 				reveal: true,
@@ -194,14 +209,103 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		await this.actions.reorderEntriesByIds(nextOrderedIds);
 	}
 
-	private async refreshAllViews(): Promise<void> {
+	private createPluginActionEnvironment(): TwoFactorPluginActionEnvironment {
+		return {
+			confirmAction: async (options) => confirmAction(this.app, options),
+			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
+			open2FAView: async () => {
+				await this.open2FAView();
+			},
+			openBulkOtpauthImportModal: async (existingEntries, expectedVaultRevision) =>
+				openBulkOtpauthImportModal(this, existingEntries, expectedVaultRevision),
+			openTotpEntryModal: async (initialDraft) => openTotpEntryModal(this, initialDraft),
+			promptForMasterPassword: async (options) => promptForMasterPassword(this, options),
+			refreshAllViews: async (mode) => {
+				await this.refreshAllViews(mode);
+			},
+			service: this.vaultService,
+			showNotice: (message: string) => {
+				this.showNotice(message);
+			},
+			t: (key, variables = {}) => this.t(key, variables),
+		};
+	}
+
+	private createCommandHandlers(): CommandHandlers {
+		return {
+			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
+			handleAddEntryCommand: async () => this.handleAddEntryCommand(),
+			handleBulkImportOtpauthLinksCommand: async () =>
+				this.handleBulkImportOtpauthLinksCommand(),
+			lockVault: (showNotice = false) => {
+				this.lockVault(showNotice);
+			},
+			open2FAView: async () => this.open2FAView(),
+			promptToUnlockVault: async () => this.promptToUnlockVault(),
+			showNotice: (message: string) => {
+				this.showNotice(message);
+			},
+			t: (key, variables = {}) => this.t(key, variables),
+		};
+	}
+
+	private createSettingsController(): TwoFactorSettingsController {
+		return {
+			confirmAndResetVault: async () => this.confirmAndResetVault(),
+			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
+			getPreferredSide: () => this.getPreferredSide(),
+			getVaultLoadIssue: () => this.getVaultLoadIssue(),
+			hasVaultLoadIssue: () => this.hasVaultLoadIssue(),
+			isUnlocked: () => this.isUnlocked(),
+			isVaultInitialized: () => this.isVaultInitialized(),
+			lockVault: (showNotice = false) => {
+				this.lockVault(showNotice);
+			},
+			open2FAView: async () => this.open2FAView(),
+			promptToChangeMasterPassword: async () => this.promptToChangeMasterPassword(),
+			promptToInitializeVault: async () => this.promptToInitializeVault(),
+			promptToUnlockVault: async () => this.promptToUnlockVault(),
+			setPreferredSide: async (side: PreferredSide) => this.setPreferredSide(side),
+			setShowFloatingLockButton: async (value: boolean) =>
+				this.setShowFloatingLockButton(value),
+			setShowUpcomingCodes: async (value: boolean) =>
+				this.setShowUpcomingCodes(value),
+			shouldShowFloatingLockButton: () => this.shouldShowFloatingLockButton(),
+			shouldShowUpcomingCodes: () => this.shouldShowUpcomingCodes(),
+			showNotice: (message: string) => {
+				this.showNotice(message);
+			},
+			t: (key: TranslationKey, variables = {}) => this.t(key, variables),
+		};
+	}
+
+	private async refreshAllViews(mode: ViewInvalidationMode = "full"): Promise<void> {
+		const renderMode = this.toViewRenderMode(mode);
 		const leaves = this.app.workspace.getLeavesOfType(OBSIDIAN_2FA_VIEW);
 		await Promise.allSettled(
 			leaves.map(async (leaf) => {
 				if (leaf.view instanceof TotpManagerView) {
-					await leaf.view.refresh();
+					await leaf.view.refresh(renderMode);
 				}
 			}),
 		);
+	}
+
+	private toViewRenderMode(mode: ViewInvalidationMode): TotpManagerViewRenderMode {
+		switch (mode) {
+			case "availability":
+				return "availability";
+			case "entries":
+				return "entries";
+			case "floatingLock":
+				return "floating-lock";
+			case "search":
+				return "search";
+			case "selection":
+				return "body";
+			case "full":
+			default:
+				return "full";
+		}
 	}
 }

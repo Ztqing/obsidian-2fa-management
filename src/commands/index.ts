@@ -1,28 +1,25 @@
-import type TwoFactorManagementPlugin from "../plugin";
+import { ActionRunner } from "../application/action-runner";
+import type { CommandHandlers } from "../application/command-handlers";
+import type { TranslatedNoticeEnvironment } from "../application/contracts";
 
-type GuardedCommandPlugin = TwoFactorManagementPlugin & {
-	showNotice?: (message: string) => void;
-};
-
-export async function executeGuardedPluginCommand(
-	plugin: Pick<GuardedCommandPlugin, "getErrorMessage" | "showNotice">,
-	task: () => Promise<unknown>,
-): Promise<boolean> {
-	try {
-		await task();
-		return true;
-	} catch (error) {
-		const message = plugin.getErrorMessage(error);
-		if (plugin.showNotice) {
-			plugin.showNotice(message);
-		} else {
-			console.error(error);
-		}
-		return false;
-	}
+interface CommandRegistrationHost extends CommandHandlers {
+	addCommand(command: {
+		callback: () => void;
+		id: string;
+		name: string;
+	}): unknown;
 }
 
-export function registerPluginCommands(plugin: GuardedCommandPlugin): void {
+export async function executeGuardedPluginCommand(
+	plugin: TranslatedNoticeEnvironment,
+	task: () => Promise<unknown>,
+): Promise<boolean> {
+	return new ActionRunner(plugin).runVoid(async () => {
+		await task();
+	});
+}
+
+export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 	plugin.addCommand({
 		id: "open-2fa-view",
 		name: plugin.t("command.openView"),

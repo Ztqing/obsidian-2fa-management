@@ -47,7 +47,7 @@ export type BulkOtpauthImportSubmitState =
 	  };
 
 export class BulkOtpauthImportModalState {
-	constructor(private readonly expectedVaultRevision: number) {}
+	constructor(private readonly expectedVaultRevision = 0) {}
 
 	private preview: BulkOtpauthImportPreview | null = null;
 	private previewDirty = false;

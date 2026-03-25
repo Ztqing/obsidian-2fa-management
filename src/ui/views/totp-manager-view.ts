@@ -68,6 +68,9 @@ export class TotpManagerView extends ItemView {
 				void this.codeRefresh.refreshVisibleCodes(
 					this.plugin,
 					this.state.getVisibleEntries(),
+					{
+						showUpcomingCodes: this.plugin.shouldShowUpcomingCodes(),
+					},
 				);
 			}, 1000),
 		);
@@ -81,18 +84,25 @@ export class TotpManagerView extends ItemView {
 	}
 
 	async refresh(mode: TotpManagerViewRenderMode = "full"): Promise<void> {
+		const showUpcomingCodes = this.plugin.shouldShowUpcomingCodes();
 		const renderResult = this.renderer.render(this.contentEl, {
 			entries: this.plugin.getEntries(),
 			isUnlocked: this.plugin.isUnlocked(),
 			isVaultInitialized: this.plugin.isVaultInitialized(),
 			showFloatingLockButton: this.plugin.shouldShowFloatingLockButton(),
-			showUpcomingCodes: this.plugin.shouldShowUpcomingCodes(),
+			showUpcomingCodes,
 			vaultLoadIssue: this.plugin.getVaultLoadIssue(),
 		}, mode);
 		if (!renderResult.shouldRefreshVisibleCodes) {
 			return;
 		}
 
-		await this.codeRefresh.refreshVisibleCodes(this.plugin, this.state.getVisibleEntries());
+		await this.codeRefresh.refreshVisibleCodes(
+			this.plugin,
+			this.state.getVisibleEntries(),
+			{
+				showUpcomingCodes,
+			},
+		);
 	}
 }

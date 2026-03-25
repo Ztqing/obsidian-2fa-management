@@ -60,13 +60,13 @@ test("registerPluginCommands keeps stable ids and guards async command failures"
 			commands.push(command);
 		},
 		getErrorMessage: () => "translated-error",
-		handleAddEntryCommand: async () => {},
-		handleBulkImportOtpauthLinksCommand: async () => {},
+		handleAddEntryCommand: async () => true,
+		handleBulkImportOtpauthLinksCommand: async () => true,
 		lockVault: () => {},
 		open2FAView: async () => {
 			throw new Error("open failed");
 		},
-		promptToUnlockVault: async () => {},
+		promptToUnlockVault: async () => true,
 		showNotice: (message) => {
 			notices.push(message);
 		},

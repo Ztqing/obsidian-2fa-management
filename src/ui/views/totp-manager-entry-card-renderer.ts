@@ -155,6 +155,7 @@ export class TotpManagerEntryCardRenderer {
 		}
 
 		const refs: EntryRowRefs = {
+			activeTransitionEl: null,
 			cardEl: card,
 			codeAnimationTimeoutId: null,
 			codeAnimationToken: 0,
@@ -164,7 +165,7 @@ export class TotpManagerEntryCardRenderer {
 			nextCodeEl,
 			previousCurrentCode: null,
 		};
-		this.codeRefresh.registerRow(entry.id, refs);
+		this.codeRefresh.registerRow(entry, refs);
 		return card;
 	}
 

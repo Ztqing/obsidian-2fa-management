@@ -1,35 +1,40 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import type TwoFactorManagementPlugin from "./plugin";
+import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { runGuardedAction } from "./application/action-runner";
+import type { TwoFactorSettingsController } from "./application/settings-controller";
 
 export class TwoFactorSettingTab extends PluginSettingTab {
-	private readonly plugin: TwoFactorManagementPlugin;
-
-	constructor(app: App, plugin: TwoFactorManagementPlugin) {
+	constructor(
+		app: App,
+		plugin: Plugin,
+		private readonly controller: TwoFactorSettingsController,
+	) {
 		super(app, plugin);
-		this.plugin = plugin;
 	}
 
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName(this.plugin.t("settings.heading")).setHeading();
+		new Setting(containerEl).setName(this.controller.t("settings.heading")).setHeading();
 		containerEl.createEl("p", {
-			text: this.plugin.t("settings.description"),
+			text: this.controller.t("settings.description"),
 		});
 
 		new Setting(containerEl)
-			.setName(this.plugin.t("settings.preferredSidebar.name"))
-			.setDesc(this.plugin.t("settings.preferredSidebar.description"))
+			.setName(this.controller.t("settings.preferredSidebar.name"))
+			.setDesc(this.controller.t("settings.preferredSidebar.description"))
 			.addDropdown((dropdown) => {
 				dropdown.addOptions({
-					right: this.plugin.t("settings.preferredSidebar.right"),
-					left: this.plugin.t("settings.preferredSidebar.left"),
+					right: this.controller.t("settings.preferredSidebar.right"),
+					left: this.controller.t("settings.preferredSidebar.left"),
 				});
-				dropdown.setValue(this.plugin.getPreferredSide());
+				dropdown.setValue(this.controller.getPreferredSide());
 				dropdown.onChange((value) => {
 					void this.runGuardedTask(
-						() => this.plugin.setPreferredSide(value === "left" ? "left" : "right"),
+						() =>
+							this.controller.setPreferredSide(
+								value === "left" ? "left" : "right",
+							),
 						{
 							redisplayOnFailure: true,
 						},
@@ -38,25 +43,14 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(this.plugin.t("settings.showUpcomingCodes.name"))
-			.setDesc(this.plugin.t("settings.showUpcomingCodes.description"))
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.shouldShowUpcomingCodes()).onChange((value) => {
-					void this.runGuardedTask(() => this.plugin.setShowUpcomingCodes(value), {
-						redisplayOnFailure: true,
-					});
-				});
-			});
-
-		new Setting(containerEl)
-			.setName(this.plugin.t("settings.showFloatingLockButton.name"))
-			.setDesc(this.plugin.t("settings.showFloatingLockButton.description"))
+			.setName(this.controller.t("settings.showUpcomingCodes.name"))
+			.setDesc(this.controller.t("settings.showUpcomingCodes.description"))
 			.addToggle((toggle) => {
 				toggle
-					.setValue(this.plugin.shouldShowFloatingLockButton())
+					.setValue(this.controller.shouldShowUpcomingCodes())
 					.onChange((value) => {
 						void this.runGuardedTask(
-							() => this.plugin.setShowFloatingLockButton(value),
+							() => this.controller.setShowUpcomingCodes(value),
 							{
 								redisplayOnFailure: true,
 							},
@@ -65,89 +59,121 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(this.plugin.t("settings.openView.name"))
-			.setDesc(this.plugin.t("settings.openView.description"))
+			.setName(this.controller.t("settings.showFloatingLockButton.name"))
+			.setDesc(this.controller.t("settings.showFloatingLockButton.description"))
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.controller.shouldShowFloatingLockButton())
+					.onChange((value) => {
+						void this.runGuardedTask(
+							() => this.controller.setShowFloatingLockButton(value),
+							{
+								redisplayOnFailure: true,
+							},
+						);
+					});
+			});
+
+		new Setting(containerEl)
+			.setName(this.controller.t("settings.openView.name"))
+			.setDesc(this.controller.t("settings.openView.description"))
 			.addButton((button) => {
-				button.setButtonText(this.plugin.t("common.openView")).onClick(() => {
-					void this.runGuardedTask(() => this.plugin.open2FAView());
+				button.setButtonText(this.controller.t("common.openView")).onClick(() => {
+					void this.runGuardedTask(() => this.controller.open2FAView());
 				});
 			});
 
-		if (this.plugin.hasVaultLoadIssue()) {
+		if (this.controller.hasVaultLoadIssue()) {
 			new Setting(containerEl)
-				.setName(this.plugin.t("settings.repair.heading"))
+				.setName(this.controller.t("settings.repair.heading"))
 				.setHeading();
 			containerEl.createEl("p", {
-				text: this.plugin.t("settings.repair.description"),
+				text: this.controller.t("settings.repair.description"),
 			});
 			new Setting(containerEl)
-				.setName(this.plugin.t("settings.repair.clearVault.name"))
-				.setDesc(this.plugin.t("settings.repair.clearVault.description"))
+				.setName(this.controller.t("settings.repair.clearVault.name"))
+				.setDesc(this.controller.t("settings.repair.clearVault.description"))
 				.addButton((button) => {
-					button.setButtonText(this.plugin.t("common.clearVault")).setWarning().onClick(() => {
-						void this.runGuardedTask(() => this.handleResetVault());
-					});
+					button
+						.setButtonText(this.controller.t("common.clearVault"))
+						.setWarning()
+						.onClick(() => {
+							void this.runGuardedTask(() => this.handleResetVault());
+						});
 				});
 			return;
 		}
 
-		if (!this.plugin.isVaultInitialized()) {
+		if (!this.controller.isVaultInitialized()) {
 			new Setting(containerEl)
-				.setName(this.plugin.t("settings.createVault.name"))
-				.setDesc(this.plugin.t("settings.createVault.description"))
+				.setName(this.controller.t("settings.createVault.name"))
+				.setDesc(this.controller.t("settings.createVault.description"))
 				.addButton((button) => {
-					button.setButtonText(this.plugin.t("common.createVault")).setCta().onClick(() => {
-						void this.runGuardedTask(() => this.handleInitializeVault());
-					});
+					button
+						.setButtonText(this.controller.t("common.createVault"))
+						.setCta()
+						.onClick(() => {
+							void this.runGuardedTask(() => this.handleInitializeVault());
+						});
 				});
 			return;
 		}
 
-		new Setting(containerEl).setName(this.plugin.t("settings.vaultLifecycle.heading")).setHeading();
+		new Setting(containerEl)
+			.setName(this.controller.t("settings.vaultLifecycle.heading"))
+			.setHeading();
 
 		new Setting(containerEl)
 			.setName(
-				this.plugin.isUnlocked()
-					? this.plugin.t("settings.unlockStatus.unlocked.name")
-					: this.plugin.t("settings.unlockStatus.locked.name"),
+				this.controller.isUnlocked()
+					? this.controller.t("settings.unlockStatus.unlocked.name")
+					: this.controller.t("settings.unlockStatus.locked.name"),
 			)
 			.setDesc(
-				this.plugin.isUnlocked()
-					? this.plugin.t("settings.unlockStatus.unlocked.description")
-					: this.plugin.t("settings.unlockStatus.locked.description"),
+				this.controller.isUnlocked()
+					? this.controller.t("settings.unlockStatus.unlocked.description")
+					: this.controller.t("settings.unlockStatus.locked.description"),
 			)
 			.addButton((button) => {
-				if (this.plugin.isUnlocked()) {
-					button.setButtonText(this.plugin.t("common.lockNow")).onClick(() => {
-						this.plugin.lockVault(true);
+				if (this.controller.isUnlocked()) {
+					button.setButtonText(this.controller.t("common.lockNow")).onClick(() => {
+						this.controller.lockVault(true);
 						this.display();
 					});
 					return;
 				}
 
-				button.setButtonText(this.plugin.t("common.unlockVault")).setCta().onClick(() => {
-					void this.runGuardedTask(() => this.handleUnlockVault());
-				});
+				button
+					.setButtonText(this.controller.t("common.unlockVault"))
+					.setCta()
+					.onClick(() => {
+						void this.runGuardedTask(() => this.handleUnlockVault());
+					});
 			});
 
 		new Setting(containerEl)
-			.setName(this.plugin.t("settings.changePassword.name"))
-			.setDesc(this.plugin.t("settings.changePassword.description"))
+			.setName(this.controller.t("settings.changePassword.name"))
+			.setDesc(this.controller.t("settings.changePassword.description"))
 			.addButton((button) => {
-				button.setButtonText(this.plugin.t("common.changePassword")).onClick(() => {
+				button.setButtonText(this.controller.t("common.changePassword")).onClick(() => {
 					void this.runGuardedTask(() => this.handleChangePassword());
 				});
 			});
 
-		new Setting(containerEl).setName(this.plugin.t("settings.dangerZone.heading")).setHeading();
+		new Setting(containerEl)
+			.setName(this.controller.t("settings.dangerZone.heading"))
+			.setHeading();
 
 		new Setting(containerEl)
-			.setName(this.plugin.t("settings.clearVault.name"))
-			.setDesc(this.plugin.t("settings.clearVault.description"))
+			.setName(this.controller.t("settings.clearVault.name"))
+			.setDesc(this.controller.t("settings.clearVault.description"))
 			.addButton((button) => {
-				button.setButtonText(this.plugin.t("common.clearVault")).setWarning().onClick(() => {
-					void this.runGuardedTask(() => this.handleResetVault());
-				});
+				button
+					.setButtonText(this.controller.t("common.clearVault"))
+					.setWarning()
+					.onClick(() => {
+						void this.runGuardedTask(() => this.handleResetVault());
+					});
 			});
 	}
 
@@ -157,46 +183,47 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 			redisplayOnFailure?: boolean;
 		} = {},
 	): Promise<boolean> {
-		try {
-			await task();
-			return true;
-		} catch (error) {
-			new Notice(this.plugin.getErrorMessage(error));
-			if (options.redisplayOnFailure) {
-				this.display();
-			}
-			return false;
-		}
+		return runGuardedAction(this.controller, task, {
+			onError: () => {
+				if (options.redisplayOnFailure) {
+					this.display();
+				}
+			},
+		});
 	}
 
 	private async handleInitializeVault(): Promise<void> {
-		const didInitialize = await this.plugin.promptToInitializeVault();
+		const didInitialize = await this.controller.promptToInitializeVault();
+
 		if (didInitialize) {
 			this.display();
 		}
 	}
 
 	private async handleUnlockVault(): Promise<void> {
-		const didUnlock = await this.plugin.promptToUnlockVault();
+		const didUnlock = await this.controller.promptToUnlockVault();
+
 		if (didUnlock) {
 			this.display();
 		}
 	}
 
 	private async handleChangePassword(): Promise<void> {
-		if (!this.plugin.isUnlocked()) {
-			new Notice(this.plugin.t("notice.unlockBeforePasswordChange"));
+		if (!this.controller.isUnlocked()) {
+			new Notice(this.controller.t("notice.unlockBeforePasswordChange"));
 			return;
 		}
 
-		const didChange = await this.plugin.promptToChangeMasterPassword();
+		const didChange = await this.controller.promptToChangeMasterPassword();
+
 		if (didChange) {
 			this.display();
 		}
 	}
 
 	private async handleResetVault(): Promise<void> {
-		const didReset = await this.plugin.confirmAndResetVault();
+		const didReset = await this.controller.confirmAndResetVault();
+
 		if (didReset) {
 			this.display();
 		}

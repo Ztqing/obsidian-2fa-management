@@ -67,3 +67,45 @@ test("createTotpDisplaySnapshot resets progress at period boundaries", async () 
 	assert.equal(snapshot.currentCode, await generateTotpCode(fixtureEntry, 60_000));
 	assert.equal(snapshot.nextCode, await generateTotpCode(fixtureEntry, 90_000));
 });
+
+test("createTotpDisplaySnapshot skips next code generation when disabled", async () => {
+	const requestedTimestamps: number[] = [];
+	const snapshot = await createTotpDisplaySnapshot(fixtureEntry, 59_000, {
+		generateCode: async (_draft, timestampMs) => {
+			const resolvedTimestampMs = timestampMs ?? 0;
+			requestedTimestamps.push(resolvedTimestampMs);
+			return resolvedTimestampMs === 59_000 ? "94287082" : "00000000";
+		},
+		includeNextCode: false,
+	});
+
+	assert.deepEqual(requestedTimestamps, [59_000]);
+	assert.equal(snapshot.currentCode, "94287082");
+	assert.equal(snapshot.hasNextCode, false);
+	assert.equal(snapshot.nextCode, "");
+});
+
+test("createTotpDisplaySnapshot reuses codes within the same TOTP window", async () => {
+	const requestedTimestamps: number[] = [];
+	const firstSnapshot = await createTotpDisplaySnapshot(fixtureEntry, 59_000, {
+		generateCode: async (_draft, timestampMs) => {
+			const resolvedTimestampMs = timestampMs ?? 0;
+			requestedTimestamps.push(resolvedTimestampMs);
+			return resolvedTimestampMs === 59_000 ? "94287082" : "37359152";
+		},
+	});
+	const secondSnapshot = await createTotpDisplaySnapshot(fixtureEntry, 59_500, {
+		generateCode: async (_draft, timestampMs) => {
+			const resolvedTimestampMs = timestampMs ?? 0;
+			requestedTimestamps.push(resolvedTimestampMs);
+			return resolvedTimestampMs === 59_500 ? "should-not-run" : "should-not-run";
+		},
+		previousSnapshot: firstSnapshot,
+	});
+
+	assert.deepEqual(requestedTimestamps, [59_000, 60_000]);
+	assert.equal(secondSnapshot.currentCode, firstSnapshot.currentCode);
+	assert.equal(secondSnapshot.nextCode, firstSnapshot.nextCode);
+	assert.equal(secondSnapshot.counter, firstSnapshot.counter);
+	assert.equal(secondSnapshot.secondsRemaining, 1);
+});

@@ -109,9 +109,9 @@ function createRendererHarness() {
 		},
 		state,
 		{
-			registerRow: (entryId, refs) => {
+			registerRow: (entry, refs) => {
 				registeredRows.push({
-					entryId,
+					entryId: entry.id,
 					nextCodeEl: refs.nextCodeEl,
 				});
 			},

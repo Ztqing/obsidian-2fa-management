@@ -14,6 +14,16 @@ import { arrayBufferToBase64, base64ToBytes } from "../utils/base64";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+function cloneBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+	const clone = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+	clone.set(bytes);
+	return clone;
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+	return cloneBytes(bytes).buffer;
+}
+
 function getWebCrypto(): Crypto {
 	if (!globalThis.crypto?.subtle) {
 		throw createUserError("crypto_unavailable");
@@ -22,8 +32,8 @@ function getWebCrypto(): Crypto {
 	return globalThis.crypto;
 }
 
-function getRandomBytes(length: number): Uint8Array {
-	const bytes = new Uint8Array(length);
+function getRandomBytes(length: number): Uint8Array<ArrayBuffer> {
+	const bytes = new Uint8Array(new ArrayBuffer(length));
 	getWebCrypto().getRandomValues(bytes);
 	return bytes;
 }
@@ -66,7 +76,7 @@ async function deriveEncryptionKey(
 ): Promise<CryptoKey> {
 	const keyMaterial = await getWebCrypto().subtle.importKey(
 		"raw",
-		textEncoder.encode(password),
+		cloneBytes(textEncoder.encode(password)),
 		"PBKDF2",
 		false,
 		["deriveKey"],
@@ -76,7 +86,7 @@ async function deriveEncryptionKey(
 		{
 			name: "PBKDF2",
 			hash: PBKDF2_HASH,
-			salt,
+			salt: cloneBytes(salt),
 			iterations: PBKDF2_ITERATIONS,
 		},
 		keyMaterial,
@@ -96,11 +106,11 @@ export async function encryptVaultEntries(
 	const salt = getRandomBytes(ENCRYPTION_SALT_BYTES);
 	const iv = getRandomBytes(ENCRYPTION_IV_BYTES);
 	const key = await deriveEncryptionKey(password, salt);
-	const plaintext = textEncoder.encode(JSON.stringify(entries));
+	const plaintext = cloneBytes(textEncoder.encode(JSON.stringify(entries)));
 	const cipherText = await getWebCrypto().subtle.encrypt(
 		{
 			name: "AES-GCM",
-			iv,
+			iv: cloneBytes(iv),
 		},
 		key,
 		plaintext,
@@ -108,8 +118,8 @@ export async function encryptVaultEntries(
 
 	return {
 		version: VAULT_DATA_VERSION,
-		saltB64: arrayBufferToBase64(salt.buffer),
-		ivB64: arrayBufferToBase64(iv.buffer),
+		saltB64: arrayBufferToBase64(toArrayBuffer(salt)),
+		ivB64: arrayBufferToBase64(toArrayBuffer(iv)),
 		cipherTextB64: arrayBufferToBase64(cipherText),
 	};
 }
@@ -126,10 +136,10 @@ export async function decryptVaultEntries(
 		plaintext = await getWebCrypto().subtle.decrypt(
 			{
 				name: "AES-GCM",
-				iv,
+				iv: cloneBytes(iv),
 			},
 			key,
-			cipherText,
+			cloneBytes(cipherText),
 		);
 	} catch (error) {
 		if (isTwoFaUserError(error)) {

@@ -60,6 +60,7 @@ function createEnvironment(options: {
 		},
 		getEntries: () => entries,
 		getPreferredSide: () => "right" as const,
+		getVaultRevision: () => 0,
 		initializeVault: async (password: string) => {
 			callLog.push(`service.initializeVault:${password}`);
 			isVaultInitialized = true;
@@ -81,7 +82,9 @@ function createEnvironment(options: {
 			isVaultInitialized = false;
 		},
 		setPreferredSide: async () => {},
+		setShowFloatingLockButton: async () => {},
 		setShowUpcomingCodes: async () => {},
+		shouldShowFloatingLockButton: () => true,
 		shouldShowUpcomingCodes: () => false,
 		unlockVault: async (password: string) => {
 			callLog.push(`service.unlockVault:${password}`);
