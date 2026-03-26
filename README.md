@@ -18,6 +18,29 @@
   - Traditional Chinese for `zh-TW`, `zh-HK`, `zh-MO`, and `zh-Hant`
   - English for every other language
 
+## Project status
+
+The desktop-first local encrypted TOTP workflow is already in place. The checklist below marks what is done and what we plan to tackle next.
+
+- [x] Build a local encrypted vault with a master password and `PBKDF2 + AES-GCM`.
+- [x] Support manual vault unlock and lock flows inside the plugin.
+- [x] Detect corrupted or unsupported stored vault data and prompt the user before repair.
+- [x] Add TOTP entry management for create, edit, delete, search, reorder, sidebar viewing, and code copy.
+- [x] Support `otpauth://` URI import, QR image import, and multi-line bulk import.
+- [x] Preview duplicates during bulk import and allow selective replacement.
+- [x] Ship localization for English, Simplified Chinese, and Traditional Chinese.
+- [x] Add preferences for sidebar placement and upcoming-code visibility.
+- [x] Establish a desktop-first release baseline with tests for encryption, TOTP, import flows, view interactions, command guards, and the version script.
+- [ ] Finish the current workspace polish around toolbar consolidation, copy feedback, code animation and layout, and unlock race hardening.
+- [ ] Add encrypted export and import with preflight validation and recovery guidance, without adding plaintext export.
+- [ ] Harden session safety with idle auto-lock, lock-on-blur or resume behavior, and optional clipboard auto-clear.
+- [ ] Move from clear-only repair toward safer data migration and compatibility handling.
+- [ ] Expand the desktop regression checklist around real release flows and larger data sets.
+- [ ] Revisit mobile support after dedicated validation beyond the current `isDesktopOnly: true` release scope.
+- [ ] Consider any cloud sync or online service work only after a clear privacy and threat model exists.
+
+The roadmap prioritizes data safety, offline usability, and desktop stability.
+
 ## Security model
 
 - Secrets are stored in Obsidian plugin data, then encrypted locally with Web Crypto using PBKDF2 + AES-GCM before saving.
