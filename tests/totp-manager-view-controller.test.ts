@@ -294,6 +294,22 @@ test("TotpManagerViewController copies a code on plain card click", async () => 
 	assert.equal(harness.getRefreshCount(), 0);
 });
 
+test("TotpManagerViewController marks the card code row after copying", async () => {
+	const harness = createControllerHarness();
+	const card = new FakeElement("div");
+	const codeRow = card.createDiv({
+		cls: "twofa-entry-card__code-row",
+	});
+
+	await harness.controller.handleCardClick(
+		harness.entries[0],
+		createMouseEvent(),
+		card as unknown as HTMLElement,
+	);
+
+	assert.equal(codeRow.hasClass("is-copy-success"), true);
+});
+
 test("TotpManagerViewController toggles selection instead of copying while in selection mode", async () => {
 	const harness = createControllerHarness();
 	harness.state.enterSelectionMode(harness.entries[0].id);

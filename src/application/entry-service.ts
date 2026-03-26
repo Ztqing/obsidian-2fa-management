@@ -1,7 +1,4 @@
-import type {
-	TotpEntryDraft,
-	TotpEntryRecord,
-} from "../types";
+import type { TotpEntryRecord } from "../types";
 import { clearSharedPreparedTotpEntryCache } from "../totp/totp";
 import type { TwoFactorPluginActionEnvironment } from "./contracts";
 import type { VaultLifecycleService } from "./vault-lifecycle-service";

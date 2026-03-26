@@ -1,9 +1,15 @@
 type FakeListener = (event: any) => void;
 
+class FakeClassList extends Set<string> {
+	remove(className: string): void {
+		this.delete(className);
+	}
+}
+
 export class FakeElement {
 	readonly attributes = new Map<string, string>();
 	readonly children: FakeElement[] = [];
-	readonly classList = new Set<string>();
+	readonly classList = new FakeClassList();
 	readonly cssProps: Record<string, string> = {};
 	readonly listeners = new Map<string, FakeListener[]>();
 	checked = false;
@@ -104,6 +110,24 @@ export class FakeElement {
 		}
 
 		return null;
+	}
+
+	findAll(selector: string): FakeElement[] {
+		if (!selector.startsWith(".")) {
+			return [];
+		}
+
+		const className = selector.slice(1);
+		const matches: FakeElement[] = [];
+		if (this.classList.has(className)) {
+			matches.push(this);
+		}
+
+		for (const child of this.children) {
+			matches.push(...child.findAll(selector));
+		}
+
+		return matches;
 	}
 
 	findByTagName(tagName: string): FakeElement | null {

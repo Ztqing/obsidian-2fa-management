@@ -3,6 +3,7 @@ import {
 	evaluateTotpEntryUriInput,
 	importDraftFromQrImage,
 	importDraftFromUri,
+	type TotpEntryImportResult,
 	type TotpEntryImportSource,
 } from "./totp-entry-modal-controller";
 import { getChangedDraftFields, type TotpEntryDraftField } from "./totp-entry-import";
@@ -76,9 +77,7 @@ export class TotpEntryImportPresenter {
 		this.applyImportResult(result);
 	}
 
-	private applyImportResult(
-		result: Awaited<ReturnType<typeof importDraftFromQrImage>> | ReturnType<typeof importDraftFromUri>,
-	): void {
+	private applyImportResult(result: TotpEntryImportResult): void {
 		if (result.kind === "error") {
 			if (result.clearImportSurface) {
 				this.environment.clearImportSurfaceState();

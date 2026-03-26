@@ -25,8 +25,6 @@ export interface GuardedActionEnvironment {
 	showNotice?(message: string): void;
 }
 
-export interface TranslatedNoticeEnvironment extends GuardedActionEnvironment {}
-
 export interface CommandHandlers extends GuardedActionEnvironment {
 	handleAddEntryCommand(): Promise<unknown>;
 	handleBulkImportOtpauthLinksCommand(): Promise<unknown>;

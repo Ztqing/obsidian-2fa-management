@@ -1,6 +1,7 @@
 import tseslint from "typescript-eslint";
 import globals from "globals";
 import { globalIgnores } from "eslint/config";
+import obsidianmd from "eslint-plugin-obsidianmd";
 
 const typedParserOptions = {
 	project: ["./tsconfig.json", "./tsconfig.tests.json"],
@@ -8,6 +9,7 @@ const typedParserOptions = {
 };
 
 export default tseslint.config(
+	...obsidianmd.configs.recommended,
 	{
 		files: ["src/**/*.ts"],
 		languageOptions: {
@@ -21,6 +23,10 @@ export default tseslint.config(
 			"@typescript-eslint": tseslint.plugin,
 		},
 		rules: {
+			"@typescript-eslint/no-deprecated": "error",
+			"@typescript-eslint/no-duplicate-type-constituents": "error",
+			"@typescript-eslint/no-empty-object-type": "error",
+			"@typescript-eslint/no-unused-vars": "error",
 			"@typescript-eslint/require-await": "error",
 		},
 	},
@@ -32,6 +38,11 @@ export default tseslint.config(
 			},
 			parser: tseslint.parser,
 			parserOptions: typedParserOptions,
+		},
+		rules: {
+			"@typescript-eslint/no-explicit-any": "off",
+			"@typescript-eslint/no-floating-promises": "off",
+			"@typescript-eslint/no-unnecessary-type-assertion": "off",
 		},
 	},
 	{

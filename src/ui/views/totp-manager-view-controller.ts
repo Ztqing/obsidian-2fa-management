@@ -587,14 +587,8 @@ export class TotpManagerViewController {
 			return null;
 		}
 
-		if (typeof card.querySelector === "function") {
-			const codeRow = card.querySelector(".twofa-entry-card__code-row");
-			if (
-				typeof HTMLElement !== "undefined" &&
-				codeRow instanceof HTMLElement
-			) {
-				return codeRow;
-			}
+		if (typeof card.findAll === "function") {
+			return card.findAll(".twofa-entry-card__code-row")[0] ?? null;
 		}
 
 		return null;

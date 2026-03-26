@@ -1,7 +1,7 @@
 import { ActionRunner } from "../application/action-runner";
 import type {
 	CommandHandlers,
-	TranslatedNoticeEnvironment,
+	GuardedActionEnvironment,
 } from "../application/contracts";
 
 interface CommandRegistrationHost extends CommandHandlers {
@@ -13,7 +13,7 @@ interface CommandRegistrationHost extends CommandHandlers {
 }
 
 export async function executeGuardedPluginCommand(
-	plugin: TranslatedNoticeEnvironment,
+	plugin: GuardedActionEnvironment,
 	task: () => Promise<unknown>,
 ): Promise<boolean> {
 	return new ActionRunner(plugin).runVoid(async () => {
