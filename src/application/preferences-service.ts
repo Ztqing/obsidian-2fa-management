@@ -8,9 +8,7 @@ export class PreferencesService {
 			TwoFactorVaultServiceLike,
 			| "getPreferredSide"
 			| "setPreferredSide"
-			| "setShowFloatingLockButton"
 			| "setShowUpcomingCodes"
-			| "shouldShowFloatingLockButton"
 			| "shouldShowUpcomingCodes"
 		>,
 		private readonly refreshViews: (mode: ViewInvalidationMode) => Promise<void>,
@@ -31,14 +29,5 @@ export class PreferencesService {
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
 		await this.service.setShowUpcomingCodes(value);
 		await this.refreshViews("entries");
-	}
-
-	shouldShowFloatingLockButton(): boolean {
-		return this.service.shouldShowFloatingLockButton();
-	}
-
-	async setShowFloatingLockButton(value: boolean): Promise<void> {
-		await this.service.setShowFloatingLockButton(value);
-		await this.refreshViews("floatingLock");
 	}
 }

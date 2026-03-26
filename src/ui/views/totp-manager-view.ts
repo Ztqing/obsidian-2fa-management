@@ -89,7 +89,6 @@ export class TotpManagerView extends ItemView {
 			entries: this.plugin.getEntries(),
 			isUnlocked: this.plugin.isUnlocked(),
 			isVaultInitialized: this.plugin.isVaultInitialized(),
-			showFloatingLockButton: this.plugin.shouldShowFloatingLockButton(),
 			showUpcomingCodes,
 			vaultLoadIssue: this.plugin.getVaultLoadIssue(),
 		}, mode);

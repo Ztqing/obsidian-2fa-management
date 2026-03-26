@@ -1,12 +1,12 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { runGuardedAction } from "./application/action-runner";
-import type { TwoFactorSettingsController } from "./application/settings-controller";
+import type { SettingsActions } from "./application/contracts";
 
 export class TwoFactorSettingTab extends PluginSettingTab {
 	constructor(
 		app: App,
 		plugin: Plugin,
-		private readonly controller: TwoFactorSettingsController,
+		private readonly controller: SettingsActions,
 	) {
 		super(app, plugin);
 	}
@@ -51,22 +51,6 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 					.onChange((value) => {
 						void this.runGuardedTask(
 							() => this.controller.setShowUpcomingCodes(value),
-							{
-								redisplayOnFailure: true,
-							},
-						);
-					});
-			});
-
-		new Setting(containerEl)
-			.setName(this.controller.t("settings.showFloatingLockButton.name"))
-			.setDesc(this.controller.t("settings.showFloatingLockButton.description"))
-			.addToggle((toggle) => {
-				toggle
-					.setValue(this.controller.shouldShowFloatingLockButton())
-					.onChange((value) => {
-						void this.runGuardedTask(
-							() => this.controller.setShowFloatingLockButton(value),
 							{
 								redisplayOnFailure: true,
 							},

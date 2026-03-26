@@ -129,9 +129,10 @@ export class TotpManagerViewState {
 		);
 	}
 
-	enterSelectionMode(entryId: string): void {
+	enterSelectionMode(entryId?: string): void {
 		this.isSelectionModeActive = true;
-		this.selectedEntryIds = new Set([entryId]);
+		this.selectedEntryIds =
+			typeof entryId === "string" ? new Set([entryId]) : new Set();
 		this.clearLongPressState();
 	}
 

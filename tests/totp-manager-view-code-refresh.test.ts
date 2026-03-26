@@ -30,6 +30,7 @@ function createRowRefs(): {
 	const countdownBadgeEl = new FakeElement("div");
 	const countdownEl = new FakeElement("div");
 	const nextCodeEl = new FakeElement("code");
+	const nextCodeRowEl = new FakeElement("div");
 
 	return {
 		refs: {
@@ -41,6 +42,7 @@ function createRowRefs(): {
 			countdownBadgeEl: countdownBadgeEl as unknown as HTMLElement,
 			countdownEl: countdownEl as unknown as HTMLElement,
 			nextCodeEl: nextCodeEl as unknown as HTMLElement,
+			nextCodeRowEl: nextCodeRowEl as unknown as HTMLElement,
 			previousCurrentCode: null,
 		},
 	};
@@ -132,6 +134,7 @@ test("TotpCodeRefreshController updates the code row for successful snapshots", 
 	);
 	assert.equal((refs.nextCodeEl as unknown as FakeElement).textContent, "654321");
 	assert.equal((refs.countdownBadgeEl as unknown as FakeElement).hasClass("is-warning"), true);
+	assert.equal((refs.nextCodeRowEl as unknown as FakeElement).hasClass("is-visible"), true);
 });
 
 test("TotpCodeRefreshController renders fallback error state when snapshot creation fails", async () => {
@@ -158,9 +161,10 @@ test("TotpCodeRefreshController renders fallback error state when snapshot creat
 		"translated-error",
 	);
 	assert.equal((refs.nextCodeEl as unknown as FakeElement).textContent, "------");
+	assert.equal((refs.nextCodeRowEl as unknown as FakeElement).hasClass("is-visible"), true);
 });
 
-test("TotpCodeRefreshController uses fade transitions under reduced motion", async () => {
+test("TotpCodeRefreshController replaces the code immediately under reduced motion", async () => {
 	const entry = createEntry("entry-1");
 	const { refs } = createRowRefs();
 	renderStaticCode(refs.codeEl, "111111");
@@ -193,23 +197,38 @@ test("TotpCodeRefreshController uses fade transitions under reduced motion", asy
 	await controller.refreshVisibleCodes(createPluginStub(), [entry]);
 
 	const codeEl = refs.codeEl as unknown as FakeElement;
-	assert.equal(codeEl.textContent, "");
-	assert.equal(codeEl.children.length, 1);
-	const transitionEl = codeEl.children[0];
-	assert.ok(transitionEl);
-	assert.equal(transitionEl.hasClass("twofa-code-transition--fade"), true);
-	assert.equal(transitionEl.hasClass("twofa-code-transition--slide"), false);
-	assert.equal(transitionEl.children.length, 2);
-	assert.equal(transitionEl.children[0]?.hasClass("twofa-code-transition__layer--old"), true);
-	assert.equal(transitionEl.children[0]?.textContent, "111111");
-	assert.equal(transitionEl.children[1]?.hasClass("twofa-code-transition__layer--new"), true);
-	assert.equal(transitionEl.children[1]?.textContent, "222222");
-	assert.equal(refs.codeAnimationTimeoutId, 1);
-	assert.equal(refs.activeTransitionEl, transitionEl as unknown as HTMLElement);
-	scheduledTimeouts[0]?.();
 	assert.equal(codeEl.textContent, "222222");
 	assert.equal(codeEl.children.length, 0);
+	assert.equal(refs.codeAnimationTimeoutId, null);
 	assert.equal(refs.activeTransitionEl, null);
+	assert.equal(scheduledTimeouts.length, 0);
+});
+
+test("TotpCodeRefreshController keeps the next code visible when upcoming codes are rendered", async () => {
+	const entry = createEntry("entry-1");
+	const { refs } = createRowRefs();
+	const controller = new TotpCodeRefreshController({
+		createDisplaySnapshot: async () =>
+			({
+				counter: 1,
+				currentCode: "222222",
+				hasNextCode: true,
+				isRefreshingSoon: false,
+				nextCode: "333333",
+				nextCounter: 2,
+				period: 30,
+				progressPercent: 20,
+				secondsRemaining: 24,
+			}) satisfies TotpDisplaySnapshot,
+	});
+
+	controller.registerRow(entry, refs);
+	await controller.refreshVisibleCodes(createPluginStub(), [entry]);
+
+	const codeEl = refs.codeEl as unknown as FakeElement;
+	assert.equal(codeEl.textContent, "222222");
+	assert.equal((refs.nextCodeEl as unknown as FakeElement).textContent, "333333");
+	assert.equal((refs.nextCodeRowEl as unknown as FakeElement).hasClass("is-visible"), true);
 });
 
 test("TotpCodeRefreshController clears the previous transition before starting a new one", async () => {
@@ -263,8 +282,9 @@ test("TotpCodeRefreshController clears the previous transition before starting a
 
 	const codeEl = refs.codeEl as unknown as FakeElement;
 	assert.equal(codeEl.children.length, 1);
-	assert.equal(codeEl.children[0]?.children[0]?.textContent, "111111");
-	assert.equal(codeEl.children[0]?.children[1]?.textContent, "222222");
+	assert.equal(codeEl.children[0]?.children.length, 6);
+	assert.equal(codeEl.children[0]?.children[0]?.children[0]?.textContent, "1");
+	assert.equal(codeEl.children[0]?.children[0]?.children[1]?.textContent, "2");
 	assert.equal(refs.activeTransitionEl, codeEl.children[0] as unknown as HTMLElement);
 	assert.equal(refs.codeAnimationTimeoutId, 1);
 
@@ -273,8 +293,9 @@ test("TotpCodeRefreshController clears the previous transition before starting a
 	assert.deepEqual(clearedTimeoutIds, [1]);
 	assert.equal(codeEl.textContent, "");
 	assert.equal(codeEl.children.length, 1);
-	assert.equal(codeEl.children[0]?.children[0]?.textContent, "222222");
-	assert.equal(codeEl.children[0]?.children[1]?.textContent, "333333");
+	assert.equal(codeEl.children[0]?.children.length, 6);
+	assert.equal(codeEl.children[0]?.children[0]?.children[0]?.textContent, "2");
+	assert.equal(codeEl.children[0]?.children[0]?.children[1]?.textContent, "3");
 	assert.equal(refs.activeTransitionEl, codeEl.children[0] as unknown as HTMLElement);
 	assert.equal(refs.codeAnimationTimeoutId, 2);
 

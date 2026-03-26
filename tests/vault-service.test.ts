@@ -16,6 +16,10 @@ const baseDraft: TotpEntryDraft = {
 function createService(
 	initialData: unknown = null,
 	options: {
+		decryptEntries?: (
+			encryptedVault: NonNullable<PluginData["vault"]>,
+			password: string,
+		) => Promise<ReturnType<TwoFactorVaultService["getEntries"]>>;
 		onSaveData?: (data: PluginData) => Promise<void>;
 	} = {},
 ) {
@@ -24,6 +28,7 @@ function createService(
 
 	const service = new TwoFactorVaultService({
 		createId: () => `entry-${++idCounter}`,
+		decryptEntries: options.decryptEntries,
 		loadData: async () => initialData,
 		saveData: async (data) => {
 			const snapshot = structuredClone(data);
@@ -35,6 +40,44 @@ function createService(
 	return {
 		savedSnapshots,
 		service,
+	};
+}
+
+function createDeferred<T>() {
+	let resolve!: (value: T | PromiseLike<T>) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((nextResolve, nextReject) => {
+		resolve = nextResolve;
+		reject = nextReject;
+	});
+
+	return {
+		promise,
+		reject,
+		resolve,
+	};
+}
+
+function createStoredVaultData(
+	overrides: Partial<PluginData> = {},
+): PluginData {
+	const { settings: overrideSettings, ...restOverrides } = overrides;
+	const defaultSettings: PluginData["settings"] = {
+		preferredSide: "right",
+		showUpcomingCodes: false,
+	};
+
+	return {
+		schemaVersion: 1,
+		vaultRevision: 1,
+		vault: {
+			version: 1,
+			saltB64: "c2FsdC1zYWx0LXNhbHQtcw==",
+			ivB64: "aXYtaXYtaXYtaXY=",
+			cipherTextB64: "Y2lwaGVyLXRleHQtYmxvY2s=",
+		},
+		...restOverrides,
+		settings: { ...defaultSettings, ...(overrideSettings ?? {}) },
 	};
 }
 
@@ -249,7 +292,100 @@ test("TwoFactorVaultService keeps settings unchanged when persistence fails", as
 
 	assert.equal(service.getPreferredSide(), "right");
 	assert.equal(service.shouldShowUpcomingCodes(), false);
-	assert.equal(service.shouldShowFloatingLockButton(), true);
+});
+
+test("TwoFactorVaultService ignores unlock completion after a manual lock", async () => {
+	const deferredUnlock = createDeferred<ReturnType<TwoFactorVaultService["getEntries"]>>();
+	const { service } = createService(createStoredVaultData(), {
+		decryptEntries: async () => deferredUnlock.promise,
+	});
+
+	await service.load();
+
+	const unlockPromise = service.unlockVault("vault-password");
+	await Promise.resolve();
+	service.lockVault();
+	deferredUnlock.resolve([
+		{
+			id: "entry-1",
+			sortOrder: 0,
+			...baseDraft,
+		},
+	]);
+	await unlockPromise;
+
+	assert.equal(service.isUnlocked(), false);
+	assert.deepEqual(service.getEntries(), []);
+});
+
+test("TwoFactorVaultService ignores unlock completion after resetting the vault", async () => {
+	const deferredUnlock = createDeferred<ReturnType<TwoFactorVaultService["getEntries"]>>();
+	const { service } = createService(createStoredVaultData(), {
+		decryptEntries: async () => deferredUnlock.promise,
+	});
+
+	await service.load();
+
+	const unlockPromise = service.unlockVault("vault-password");
+	await Promise.resolve();
+	await service.resetVault();
+	deferredUnlock.resolve([
+		{
+			id: "entry-1",
+			sortOrder: 0,
+			...baseDraft,
+		},
+	]);
+	await unlockPromise;
+
+	assert.equal(service.isVaultInitialized(), false);
+	assert.equal(service.isUnlocked(), false);
+	assert.deepEqual(service.getEntries(), []);
+});
+
+test("TwoFactorVaultService only applies the latest overlapping unlock attempt", async () => {
+	const firstUnlock = createDeferred<ReturnType<TwoFactorVaultService["getEntries"]>>();
+	const secondUnlock = createDeferred<ReturnType<TwoFactorVaultService["getEntries"]>>();
+	let unlockCallCount = 0;
+	const { service } = createService(createStoredVaultData(), {
+		decryptEntries: async () => {
+			unlockCallCount += 1;
+			return unlockCallCount === 1
+				? firstUnlock.promise
+				: secondUnlock.promise;
+		},
+	});
+
+	await service.load();
+
+	const firstUnlockPromise = service.unlockVault("vault-password");
+	const secondUnlockPromise = service.unlockVault("vault-password");
+
+	firstUnlock.resolve([
+		{
+			id: "stale-entry",
+			sortOrder: 0,
+			...baseDraft,
+		},
+	]);
+	await firstUnlockPromise;
+
+	assert.equal(service.isUnlocked(), false);
+	assert.deepEqual(service.getEntries(), []);
+
+	secondUnlock.resolve([
+		{
+			id: "fresh-entry",
+			sortOrder: 0,
+			...baseDraft,
+			accountName: "fresh@example.com",
+		},
+	]);
+	await secondUnlockPromise;
+
+	assert.equal(service.isUnlocked(), true);
+	assert.deepEqual(service.getEntries().map((entry) => entry.id), ["fresh-entry"]);
+	assert.equal(service.getEntries()[0]?.accountName, "fresh@example.com");
 });
 
 test("TwoFactorVaultService rejects stale edit submissions", async () => {

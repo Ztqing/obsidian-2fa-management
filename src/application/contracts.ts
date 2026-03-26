@@ -1,4 +1,4 @@
-import type { Plugin, WorkspaceLeaf } from "obsidian";
+import type { WorkspaceLeaf } from "obsidian";
 import type { TranslationKey } from "../i18n/translations";
 import type {
 	BulkOtpauthImportCommitResult,
@@ -16,7 +16,6 @@ import type { MasterPasswordPromptOptions } from "../ui/modals/master-password-m
 export type ViewInvalidationMode =
 	| "availability"
 	| "entries"
-	| "floatingLock"
 	| "full"
 	| "search"
 	| "selection";
@@ -28,9 +27,7 @@ export interface GuardedActionEnvironment {
 
 export interface TranslatedNoticeEnvironment extends GuardedActionEnvironment {}
 
-export interface CommandHandlers
-	extends GuardedActionEnvironment,
-		Pick<Plugin, "addCommand"> {
+export interface CommandHandlers extends GuardedActionEnvironment {
 	handleAddEntryCommand(): Promise<unknown>;
 	handleBulkImportOtpauthLinksCommand(): Promise<unknown>;
 	lockVault(showNotice?: boolean): void;
@@ -52,9 +49,7 @@ export interface SettingsActions extends GuardedActionEnvironment {
 	promptToInitializeVault(): Promise<boolean>;
 	promptToUnlockVault(): Promise<boolean>;
 	setPreferredSide(side: PreferredSide): Promise<void>;
-	setShowFloatingLockButton(value: boolean): Promise<void>;
 	setShowUpcomingCodes(value: boolean): Promise<void>;
-	shouldShowFloatingLockButton(): boolean;
 	shouldShowUpcomingCodes(): boolean;
 	t(key: TranslationKey, variables?: TranslationVariables): string;
 }
@@ -76,9 +71,7 @@ export interface TwoFactorVaultServiceLike {
 	reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void>;
 	resetVault(): Promise<void>;
 	setPreferredSide(side: PreferredSide): Promise<void>;
-	setShowFloatingLockButton(value: boolean): Promise<void>;
 	setShowUpcomingCodes(value: boolean): Promise<void>;
-	shouldShowFloatingLockButton(): boolean;
 	shouldShowUpcomingCodes(): boolean;
 	unlockVault(password: string): Promise<void>;
 	updateEntry(

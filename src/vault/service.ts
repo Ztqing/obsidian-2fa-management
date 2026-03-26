@@ -20,6 +20,10 @@ import { VaultSession } from "./session";
 
 export interface TwoFactorVaultServiceDependencies extends VaultRepositoryDependencies {
 	createId: () => string;
+	decryptEntries?: (
+		encryptedVault: NonNullable<PluginData["vault"]>,
+		password: string,
+	) => Promise<TotpEntryRecord[]>;
 }
 
 export class TwoFactorVaultService {
@@ -90,18 +94,6 @@ export class TwoFactorVaultService {
 		});
 	}
 
-	shouldShowFloatingLockButton(): boolean {
-		return this.repository.shouldShowFloatingLockButton();
-	}
-
-	async setShowFloatingLockButton(value: boolean): Promise<void> {
-		await this.enqueueWrite(async () => {
-			await this.repository.persistSettings({
-				showFloatingLockButton: value,
-			});
-		});
-	}
-
 	async initializeVault(password: string): Promise<void> {
 		await this.enqueueWrite(async () => {
 			this.assertVaultCanBeCreated();
@@ -118,8 +110,11 @@ export class TwoFactorVaultService {
 			throw createUserError("vault_unlock_required");
 		}
 
-		const nextEntries = await decryptVaultEntries(pluginData.vault, password);
-		this.session.begin(nextEntries, password);
+		const unlockAttemptToken = this.session.startUnlockAttempt();
+		const nextEntries = await (
+			this.dependencies.decryptEntries ?? decryptVaultEntries
+		)(pluginData.vault, password);
+		this.session.completeUnlock(nextEntries, password, unlockAttemptToken);
 	}
 
 	lockVault(): void {

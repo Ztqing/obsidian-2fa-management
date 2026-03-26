@@ -1,14 +1,10 @@
 import { Notice, Plugin, getLanguage, type WorkspaceLeaf } from "obsidian";
-import {
-	createCommandHandlers,
-	type CommandHandlers,
-} from "./application/command-handlers";
-import type { ViewInvalidationMode } from "./application/contracts";
+import type {
+	CommandHandlers,
+	SettingsActions,
+	ViewInvalidationMode,
+} from "./application/contracts";
 import { PreferencesService } from "./application/preferences-service";
-import {
-	createSettingsController,
-	type TwoFactorSettingsController,
-} from "./application/settings-controller";
 import { registerPluginCommands } from "./commands/index";
 import { OBSIDIAN_2FA_VIEW } from "./constants";
 import { USER_ERROR_TRANSLATION_KEYS, isTwoFaUserError } from "./errors";
@@ -57,20 +53,14 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		this.createPluginActionEnvironment(),
 	);
 
-	private readonly commandHandlers = createCommandHandlers(
-		this.createCommandHandlers(),
-	);
-
-	private readonly settingsController = createSettingsController(
-		this.createSettingsController(),
-	);
-
 	async onload(): Promise<void> {
 		await this.vaultService.load();
 		this.registerView(OBSIDIAN_2FA_VIEW, (leaf) => new TotpManagerView(leaf, this));
-		this.addSettingTab(new TwoFactorSettingTab(this.app, this, this.settingsController));
+		this.addSettingTab(
+			new TwoFactorSettingTab(this.app, this, this.createSettingsController()),
+		);
 		registerPluginCommands({
-			...this.commandHandlers,
+			...this.createCommandHandlers(),
 			addCommand: this.addCommand.bind(this),
 		});
 	}
@@ -138,14 +128,6 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
 		await this.preferencesService.setShowUpcomingCodes(value);
-	}
-
-	shouldShowFloatingLockButton(): boolean {
-		return this.preferencesService.shouldShowFloatingLockButton();
-	}
-
-	async setShowFloatingLockButton(value: boolean): Promise<void> {
-		await this.preferencesService.setShowFloatingLockButton(value);
 	}
 
 	async open2FAView(): Promise<WorkspaceLeaf> {
@@ -249,7 +231,7 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		};
 	}
 
-	private createSettingsController(): TwoFactorSettingsController {
+	private createSettingsController(): SettingsActions {
 		return {
 			confirmAndResetVault: async () => this.confirmAndResetVault(),
 			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
@@ -266,11 +248,8 @@ export default class TwoFactorManagementPlugin extends Plugin {
 			promptToInitializeVault: async () => this.promptToInitializeVault(),
 			promptToUnlockVault: async () => this.promptToUnlockVault(),
 			setPreferredSide: async (side: PreferredSide) => this.setPreferredSide(side),
-			setShowFloatingLockButton: async (value: boolean) =>
-				this.setShowFloatingLockButton(value),
 			setShowUpcomingCodes: async (value: boolean) =>
 				this.setShowUpcomingCodes(value),
-			shouldShowFloatingLockButton: () => this.shouldShowFloatingLockButton(),
 			shouldShowUpcomingCodes: () => this.shouldShowUpcomingCodes(),
 			showNotice: (message: string) => {
 				this.showNotice(message);
@@ -297,8 +276,6 @@ export default class TwoFactorManagementPlugin extends Plugin {
 				return "availability";
 			case "entries":
 				return "entries";
-			case "floatingLock":
-				return "floating-lock";
 			case "search":
 				return "search";
 			case "selection":

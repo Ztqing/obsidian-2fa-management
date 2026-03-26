@@ -18,10 +18,29 @@ export class VaultSession {
 		return this.sessionToken;
 	}
 
+	startUnlockAttempt(): number {
+		this.sessionToken += 1;
+		return this.sessionToken;
+	}
+
 	begin(entries: readonly TotpEntryRecord[], password: string): void {
 		this.sessionToken += 1;
 		this.unlockedEntries = [...entries];
 		this.sessionPassword = password;
+	}
+
+	completeUnlock(
+		entries: readonly TotpEntryRecord[],
+		password: string,
+		expectedSessionToken: number,
+	): boolean {
+		if (this.sessionToken !== expectedSessionToken) {
+			return false;
+		}
+
+		this.unlockedEntries = [...entries];
+		this.sessionPassword = password;
+		return true;
 	}
 
 	sync(

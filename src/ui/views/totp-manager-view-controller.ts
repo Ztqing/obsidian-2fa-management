@@ -216,6 +216,11 @@ export function createTotpManagerViewControllerEnvironment(
 }
 
 export class TotpManagerViewController {
+	private readonly copyFeedbackTimers = new WeakMap<
+		HTMLElement,
+		ReturnType<typeof setTimeout>
+	>();
+
 	constructor(
 		private readonly environment: TotpManagerViewControllerEnvironment,
 		private readonly state: TotpManagerViewState,
@@ -234,8 +239,8 @@ export class TotpManagerViewController {
 			onBulkImport: () => {
 				void this.handleBulkImport();
 			},
-			onCardClick: (entry, event) => {
-				void this.handleCardClick(entry, event);
+			onCardClick: (entry, card, event) => {
+				void this.handleCardClick(entry, event, card);
 			},
 			onCardContextMenu: (entry, event) => {
 				this.handleCardContextMenu(entry, event);
@@ -270,8 +275,8 @@ export class TotpManagerViewController {
 			onExitSelectionMode: () => {
 				void this.exitSelectionMode();
 			},
-			onLockVault: () => {
-				this.lockVault();
+			onOpenMoreMenu: (target) => {
+				this.openToolbarMenu(target);
 			},
 			onSearchQueryChange: (query) => {
 				void this.updateSearchQuery(query);
@@ -329,9 +334,44 @@ export class TotpManagerViewController {
 		await this.requestRefresh("body");
 	}
 
-	async enterSelectionMode(entryId: string): Promise<void> {
+	async enterSelectionMode(entryId?: string): Promise<void> {
 		this.state.enterSelectionMode(entryId);
 		await this.requestRefresh("body");
+	}
+
+	openToolbarMenu(target: MenuTarget): void {
+		const menu = this.environment.createMenu();
+		menu.addItem((item) => {
+			item
+				.setTitle(this.environment.t("common.bulkImport"))
+				.setIcon("upload")
+				.onClick(() => {
+					void this.handleBulkImport();
+				});
+		});
+
+		if (this.state.getVisibleEntries().length > 0) {
+			menu.addItem((item) => {
+				item
+					.setTitle(this.environment.t("common.multiSelect"))
+					.setIcon("check-square")
+					.onClick(() => {
+						void this.enterSelectionMode();
+					});
+			});
+		}
+
+		menu.addSeparator();
+		menu.addItem((item) => {
+			item
+				.setTitle(this.environment.t("common.lock"))
+				.setDanger()
+				.setIcon("lock")
+				.onClick(() => {
+					this.lockVault();
+				});
+		});
+		this.showMenuAtTarget(menu, target);
 	}
 
 	handleCardPointerDown(entry: TotpEntryRecord, event: PointerEvent): void {
@@ -411,6 +451,7 @@ export class TotpManagerViewController {
 	async handleCardClick(
 		entry: TotpEntryRecord,
 		event: MouseEvent,
+		card?: HTMLElement,
 	): Promise<void> {
 		if (this.state.consumeSuppressedClick(entry.id)) {
 			return;
@@ -426,7 +467,7 @@ export class TotpManagerViewController {
 			return;
 		}
 
-		await this.copyEntryCode(entry);
+		await this.copyEntryCode(entry, card);
 	}
 
 	handleCardContextMenu(entry: TotpEntryRecord, event: MouseEvent): void {
@@ -504,10 +545,14 @@ export class TotpManagerViewController {
 		await this.requestRefresh("full");
 	}
 
-	private async copyEntryCode(entry: TotpEntryRecord): Promise<void> {
+	private async copyEntryCode(
+		entry: TotpEntryRecord,
+		card?: HTMLElement,
+	): Promise<void> {
 		try {
 			const snapshot = await this.environment.createTotpSnapshot(entry);
 			await this.environment.copyTextToClipboard(snapshot.code);
+			this.flashCopyFeedback(card);
 			this.environment.showNotice(
 				this.environment.t("notice.codeCopied", {
 					accountName: entry.accountName,
@@ -516,6 +561,43 @@ export class TotpManagerViewController {
 		} catch (error) {
 			this.environment.showNotice(this.environment.getErrorMessage(error));
 		}
+	}
+
+	private flashCopyFeedback(card?: HTMLElement): void {
+		const codeRow = this.findCardCodeRow(card);
+		if (!codeRow || typeof globalThis.setTimeout !== "function") {
+			return;
+		}
+
+		const previousTimerId = this.copyFeedbackTimers.get(codeRow);
+		if (previousTimerId && typeof globalThis.clearTimeout === "function") {
+			globalThis.clearTimeout(previousTimerId);
+		}
+
+		codeRow.classList.add("is-copy-success");
+		const timerId = globalThis.setTimeout(() => {
+			codeRow.classList.remove("is-copy-success");
+			this.copyFeedbackTimers.delete(codeRow);
+		}, 520);
+		this.copyFeedbackTimers.set(codeRow, timerId);
+	}
+
+	private findCardCodeRow(card?: HTMLElement): HTMLElement | null {
+		if (!card) {
+			return null;
+		}
+
+		if (typeof card.querySelector === "function") {
+			const codeRow = card.querySelector(".twofa-entry-card__code-row");
+			if (
+				typeof HTMLElement !== "undefined" &&
+				codeRow instanceof HTMLElement
+			) {
+				return codeRow;
+			}
+		}
+
+		return null;
 	}
 
 	async handleGlobalPointerEnd(event: PointerEvent): Promise<void> {

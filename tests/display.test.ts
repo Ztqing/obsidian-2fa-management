@@ -11,9 +11,11 @@ const fixtureEntry = {
 	period: 30,
 };
 
-test("normalizePluginData defaults view toggles when settings are missing", () => {
-	assert.equal(normalizePluginData({}).settings.showUpcomingCodes, false);
-	assert.equal(normalizePluginData({}).settings.showFloatingLockButton, true);
+test("normalizePluginData defaults active settings and ignores legacy floating-lock data", () => {
+	assert.deepEqual(normalizePluginData({}).settings, {
+		preferredSide: "right",
+		showUpcomingCodes: false,
+	});
 	assert.equal(
 		normalizePluginData({
 			settings: {
@@ -30,22 +32,19 @@ test("normalizePluginData defaults view toggles when settings are missing", () =
 		}).settings.showUpcomingCodes,
 		false,
 	);
-	assert.equal(
-		normalizePluginData({
-			settings: {
-				showFloatingLockButton: false,
-			},
-		}).settings.showFloatingLockButton,
-		false,
-	);
-	assert.equal(
-		normalizePluginData({
-			settings: {
-				showFloatingLockButton: "no",
-			},
-		}).settings.showFloatingLockButton,
-		true,
-	);
+
+	const normalizedSettings = normalizePluginData({
+		settings: {
+			showFloatingLockButton: false,
+			showUpcomingCodes: true,
+		},
+	}).settings as unknown as Record<string, unknown>;
+
+	assert.deepEqual(normalizedSettings, {
+		preferredSide: "right",
+		showUpcomingCodes: true,
+	});
+	assert.equal("showFloatingLockButton" in normalizedSettings, false);
 });
 
 test("createTotpDisplaySnapshot includes the next code and refresh progress", async () => {

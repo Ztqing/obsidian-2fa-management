@@ -1,6 +1,8 @@
 import { ActionRunner } from "../application/action-runner";
-import type { CommandHandlers } from "../application/command-handlers";
-import type { TranslatedNoticeEnvironment } from "../application/contracts";
+import type {
+	CommandHandlers,
+	TranslatedNoticeEnvironment,
+} from "../application/contracts";
 
 interface CommandRegistrationHost extends CommandHandlers {
 	addCommand(command: {

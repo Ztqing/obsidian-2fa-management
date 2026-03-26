@@ -10,13 +10,10 @@ import type { TotpEntryRecord } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
 import {
 	getCodeTransitionPlan,
-	type CodeAnimationMode,
 } from "./code-transition";
 import type { DragState } from "./totp-manager-view-state";
 
 const CODE_PLACEHOLDER = "------";
-const CODE_TRANSITION_SLIDE_DURATION_MS = 190;
-const CODE_TRANSITION_FADE_DURATION_MS = 140;
 
 export interface EntryRowRefs {
 	cardEl: HTMLElement;
@@ -24,6 +21,7 @@ export interface EntryRowRefs {
 	countdownBadgeEl: HTMLElement;
 	countdownEl: HTMLElement;
 	nextCodeEl: HTMLElement | null;
+	nextCodeRowEl: HTMLElement | null;
 	activeTransitionEl: HTMLElement | null;
 	previousCurrentCode: string | null;
 	codeAnimationTimeoutId: number | null;
@@ -47,9 +45,52 @@ interface DragStateSnapshot {
 	placement: DragState["placement"];
 }
 
+function elementHasClass(element: HTMLElement, className: string): boolean {
+	const testElement = element as HTMLElement & {
+		hasClass?: (value: string) => boolean;
+	};
+	if (typeof testElement.hasClass === "function") {
+		return testElement.hasClass(className);
+	}
+
+	return element.classList?.contains(className) ?? false;
+}
+
+function getCodeSegments(value: string): string[] {
+	if (!/^[0-9-]+$/.test(value) || value.length <= 4) {
+		return [value];
+	}
+
+	if (value.length % 2 === 0 && value.length <= 8) {
+		const half = value.length / 2;
+		return [value.slice(0, half), value.slice(half)];
+	}
+
+	const segments: string[] = [];
+	for (let index = 0; index < value.length; index += 3) {
+		segments.push(value.slice(index, index + 3));
+	}
+	return segments;
+}
+
 export function renderStaticCode(containerEl: HTMLElement, value: string): void {
 	containerEl.empty();
-	containerEl.setText(value);
+	const shouldRenderSegments =
+		elementHasClass(containerEl, "twofa-entry-card__code") ||
+		elementHasClass(containerEl, "twofa-entry-card__next-code");
+	const segments = shouldRenderSegments ? getCodeSegments(value) : [value];
+
+	if (segments.length === 1) {
+		containerEl.setText(value);
+		return;
+	}
+
+	for (const segment of segments) {
+		containerEl.createSpan({
+			cls: "twofa-code-text__segment",
+			text: segment,
+		});
+	}
 }
 
 interface TotpCodeRefreshTimerApi {
@@ -321,7 +362,6 @@ export class TotpCodeRefreshController {
 					value: result.snapshot,
 				});
 				this.applySnapshot(refs, result.snapshot, {
-					animationMode: undefined,
 					countdownLabel: plugin.t("view.entry.countdown", {
 						seconds: result.snapshot.secondsRemaining,
 					}),
@@ -370,7 +410,7 @@ export class TotpCodeRefreshController {
 
 		if (cachedDisplay.kind === "snapshot") {
 			this.applySnapshot(refs, cachedDisplay.value, {
-				animationMode: "none",
+				disableAnimation: true,
 				countdownLabel: `view.entry.countdown:${JSON.stringify({
 					seconds: cachedDisplay.value.secondsRemaining,
 				})}`,
@@ -388,7 +428,7 @@ export class TotpCodeRefreshController {
 		refs: EntryRowRefs,
 		snapshot: TotpDisplaySnapshot,
 		options: {
-			animationMode?: CodeAnimationMode;
+			disableAnimation?: boolean;
 			countdownLabel: string;
 		},
 	): void {
@@ -401,7 +441,8 @@ export class TotpCodeRefreshController {
 		this.updateCurrentCodeDisplay(
 			refs,
 			snapshot.currentCode,
-			options.animationMode ?? transitionPlan.currentAnimationMode,
+			options.disableAnimation ? "none" : transitionPlan.currentAnimationMode,
+			transitionPlan,
 		);
 		refs.codeEl.removeClass("is-error");
 		refs.countdownEl.setText(String(snapshot.secondsRemaining));
@@ -418,6 +459,7 @@ export class TotpCodeRefreshController {
 				snapshot.hasNextCode === false ? CODE_PLACEHOLDER : snapshot.nextCode,
 			);
 		}
+		this.setNextCodeVisibility(refs, refs.nextCodeRowEl !== null);
 
 		refs.previousCurrentCode = snapshot.currentCode;
 	}
@@ -442,6 +484,7 @@ export class TotpCodeRefreshController {
 		if (refs.nextCodeEl) {
 			renderStaticCode(refs.nextCodeEl, CODE_PLACEHOLDER);
 		}
+		this.setNextCodeVisibility(refs, refs.nextCodeRowEl !== null);
 	}
 
 	private applyPlaceholderState(refs: EntryRowRefs): void {
@@ -457,12 +500,14 @@ export class TotpCodeRefreshController {
 		if (refs.nextCodeEl) {
 			renderStaticCode(refs.nextCodeEl, CODE_PLACEHOLDER);
 		}
+		this.setNextCodeVisibility(refs, refs.nextCodeRowEl !== null);
 	}
 
 	private updateCurrentCodeDisplay(
 		refs: EntryRowRefs,
 		value: string,
-		animationMode: CodeAnimationMode,
+		animationMode: "none" | "roll",
+		transitionPlan: ReturnType<typeof getCodeTransitionPlan>,
 	): void {
 		this.clearCodeTransition(refs);
 
@@ -476,24 +521,31 @@ export class TotpCodeRefreshController {
 		const transitionEl = refs.codeEl.createDiv({
 			cls: "twofa-code-transition",
 		});
-		transitionEl.addClass(
-			animationMode === "fade"
-				? "twofa-code-transition--fade"
-				: "twofa-code-transition--slide",
-		);
-		transitionEl.createDiv({
-			cls: "twofa-code-transition__layer twofa-code-transition__layer--old",
-			text: previousValue,
-		});
-		transitionEl.createDiv({
-			cls: "twofa-code-transition__layer twofa-code-transition__layer--new",
-			text: value,
-		});
+		transitionEl.addClass("twofa-code-transition--roll");
+
+		for (const segment of transitionPlan.segments) {
+			const segmentEl = transitionEl.createSpan({
+				cls: "twofa-code-transition__segment",
+			});
+			segmentEl.setCssProps({
+				"--twofa-code-delay": `${segment.delayMs}ms`,
+			});
+			if (!segment.shouldAnimate) {
+				segmentEl.addClass("is-static");
+				segmentEl.setText(segment.nextCharacter);
+				continue;
+			}
+
+			segmentEl.createSpan({
+				cls: "twofa-code-transition__digit twofa-code-transition__digit--old",
+				text: segment.previousCharacter || previousValue[segment.index] || "",
+			});
+			segmentEl.createSpan({
+				cls: "twofa-code-transition__digit twofa-code-transition__digit--new",
+				text: segment.nextCharacter,
+			});
+		}
 		refs.activeTransitionEl = transitionEl;
-		const timeoutMs =
-			animationMode === "fade"
-				? CODE_TRANSITION_FADE_DURATION_MS
-				: CODE_TRANSITION_SLIDE_DURATION_MS;
 		const animationToken = refs.codeAnimationToken + 1;
 		refs.codeAnimationToken = animationToken;
 		refs.codeAnimationTimeoutId = this.timerApi.setTimeout(() => {
@@ -504,13 +556,17 @@ export class TotpCodeRefreshController {
 			refs.codeAnimationTimeoutId = null;
 			refs.activeTransitionEl = null;
 			this.setCurrentCodeText(refs, value);
-		}, timeoutMs);
+		}, transitionPlan.totalDurationMs);
 	}
 
 	private setCurrentCodeText(refs: EntryRowRefs, value: string): void {
 		refs.activeTransitionEl = null;
 		refs.previousCurrentCode = value === CODE_PLACEHOLDER ? null : value;
 		renderStaticCode(refs.codeEl, value);
+	}
+
+	private setNextCodeVisibility(refs: EntryRowRefs, isVisible: boolean): void {
+		refs.nextCodeRowEl?.toggleClass("is-visible", isVisible);
 	}
 
 	private clearCodeTransitions(): void {

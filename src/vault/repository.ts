@@ -50,10 +50,6 @@ export class VaultRepository {
 		return this.pluginData.settings.showUpcomingCodes;
 	}
 
-	shouldShowFloatingLockButton(): boolean {
-		return this.pluginData.settings.showFloatingLockButton;
-	}
-
 	createNextPluginData(options: {
 		bumpVaultRevision?: boolean;
 		settings?: PluginSettings;

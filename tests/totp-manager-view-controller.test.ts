@@ -434,6 +434,41 @@ test("TotpManagerViewController opens the keyboard menu at the card position", a
 	assert.deepEqual(harness.callLog, ["edit:entry-1"]);
 });
 
+test("TotpManagerViewController opens the toolbar menu with bulk actions and lock", async () => {
+	const harness = createControllerHarness();
+	const button = new FakeElement("button");
+	button.setBoundingClientRect({
+		height: 36,
+		right: 180,
+		top: 48,
+		width: 36,
+	});
+
+	harness.controller.openToolbarMenu(button as unknown as HTMLElement);
+
+	const menu = harness.getLatestMenu();
+	assert.ok(menu);
+	assert.deepEqual(menu?.position, {
+		left: true,
+		width: 36,
+		x: 168,
+		y: 66,
+	});
+	assert.deepEqual(
+		menu.items.map((item) =>
+			item.type === "separator" ? "__separator__" : item.title,
+		),
+		["common.bulkImport", "common.multiSelect", "__separator__", "common.lock"],
+	);
+	assert.equal(getMenuItem(menu, "common.lock")?.danger, true);
+
+	getMenuItem(menu, "common.multiSelect")?.click?.();
+	assert.equal(harness.state.isSelectionMode(), true);
+	assert.equal(harness.state.getSelectedCount(), 0);
+	assert.equal(harness.getRefreshCount(), 1);
+	assert.deepEqual(harness.getRefreshModes(), ["body"]);
+});
+
 test("TotpManagerViewController enters selection mode from the context menu", async () => {
 	const harness = createControllerHarness();
 	const event = createMouseEvent();

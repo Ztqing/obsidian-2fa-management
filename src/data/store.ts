@@ -117,8 +117,6 @@ export function normalizePluginDataWithIssues(value: unknown): {
 				settings: {
 					preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
 					showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
-					showFloatingLockButton:
-						DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
 				},
 			},
 			vaultLoadIssue,
@@ -142,10 +140,6 @@ export function normalizePluginDataWithIssues(value: unknown): {
 				showUpcomingCodes: normalizeBoolean(
 					rawSettings.showUpcomingCodes,
 					DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
-				),
-				showFloatingLockButton: normalizeBoolean(
-					rawSettings.showFloatingLockButton,
-					DEFAULT_PLUGIN_DATA.settings.showFloatingLockButton,
 				),
 			},
 		},

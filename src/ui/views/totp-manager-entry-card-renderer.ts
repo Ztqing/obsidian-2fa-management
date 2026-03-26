@@ -70,7 +70,7 @@ export class TotpManagerEntryCardRenderer {
 			this.actions.onCardPointerCancel(event);
 		});
 		card.addEventListener("click", (event) => {
-			this.actions.onCardClick(entry, event);
+			this.actions.onCardClick(entry, card, event);
 		});
 		card.addEventListener("contextmenu", (event) => {
 			this.actions.onCardContextMenu(entry, event);
@@ -89,7 +89,10 @@ export class TotpManagerEntryCardRenderer {
 			cls: "twofa-entry-card__provider-icon",
 		});
 		providerIcon.setAttribute("aria-hidden", "true");
-		this.setProviderIcon(providerIcon, this.resolveProviderIcon(entry));
+		const providerIconId = this.resolveProviderIcon(entry);
+		providerIcon.setAttribute("data-provider-icon", providerIconId);
+		card.setAttribute("data-provider-icon", providerIconId);
+		this.setProviderIcon(providerIcon, providerIconId);
 
 		const titleBlock = identity.createDiv({
 			cls: "twofa-entry-card__title-block",
@@ -101,6 +104,23 @@ export class TotpManagerEntryCardRenderer {
 		});
 		titleEl.setAttribute("id", titleId);
 		const labelledByIds = [titleId];
+
+		const statusRail = header.createDiv({
+			cls: "twofa-entry-card__status-rail",
+		});
+		const countdownBadgeEl = statusRail.createDiv({
+			cls: "twofa-entry-card__countdown-badge",
+		});
+		countdownBadgeEl.setAttribute(
+			"aria-label",
+			this.plugin.t("view.entry.countdown", {
+				seconds: 0,
+			}),
+		);
+		const countdownEl = countdownBadgeEl.createDiv({
+			cls: "twofa-entry-card__countdown",
+			text: "...",
+		});
 
 		if (entry.issuer) {
 			const subtitleId = `twofa-entry-subtitle-${entry.id}`;
@@ -120,35 +140,25 @@ export class TotpManagerEntryCardRenderer {
 		const codeRow = codeSection.createDiv({
 			cls: "twofa-entry-card__code-row",
 		});
-		const codeEl = codeRow.createEl("code", {
+		const codeCluster = codeRow.createDiv({
+			cls: "twofa-entry-card__code-cluster",
+		});
+		const codePrimary = codeCluster.createDiv({
+			cls: "twofa-entry-card__code-primary",
+		});
+		const codeEl = codePrimary.createEl("code", {
 			cls: "twofa-entry-card__code",
 		});
 		renderStaticCode(codeEl, CODE_PLACEHOLDER);
 
-		const countdownBadgeEl = codeRow.createDiv({
-			cls: "twofa-entry-card__countdown-badge",
-		});
-		countdownBadgeEl.setAttribute(
-			"aria-label",
-			this.plugin.t("view.entry.countdown", {
-				seconds: 0,
-			}),
-		);
-		const countdownEl = countdownBadgeEl.createDiv({
-			cls: "twofa-entry-card__countdown",
-			text: "...",
-		});
-
 		let nextCodeEl: HTMLElement | null = null;
+		let nextCodeRowEl: HTMLElement | null = null;
 		if (showUpcomingCodes) {
-			const supportRow = card.createDiv({
-				cls: "twofa-entry-card__supporting-row",
+			nextCodeRowEl = codeCluster.createDiv({
+				cls: "twofa-entry-card__next-code-row is-visible",
 			});
-			supportRow.createDiv({
-				cls: "twofa-entry-card__supporting-label",
-				text: this.plugin.t("view.entry.nextCode"),
-			});
-			nextCodeEl = supportRow.createEl("code", {
+			nextCodeRowEl.setAttribute("aria-label", this.plugin.t("view.entry.nextCode"));
+			nextCodeEl = nextCodeRowEl.createEl("code", {
 				cls: "twofa-entry-card__next-code",
 			});
 			renderStaticCode(nextCodeEl, CODE_PLACEHOLDER);
@@ -163,6 +173,7 @@ export class TotpManagerEntryCardRenderer {
 			countdownBadgeEl,
 			countdownEl,
 			nextCodeEl,
+			nextCodeRowEl,
 			previousCurrentCode: null,
 		};
 		this.codeRefresh.registerRow(entry, refs);

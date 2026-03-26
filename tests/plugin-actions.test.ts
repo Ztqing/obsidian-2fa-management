@@ -82,9 +82,7 @@ function createEnvironment(options: {
 			isVaultInitialized = false;
 		},
 		setPreferredSide: async () => {},
-		setShowFloatingLockButton: async () => {},
 		setShowUpcomingCodes: async () => {},
-		shouldShowFloatingLockButton: () => true,
 		shouldShowUpcomingCodes: () => false,
 		unlockVault: async (password: string) => {
 			callLog.push(`service.unlockVault:${password}`);

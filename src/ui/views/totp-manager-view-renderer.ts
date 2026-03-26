@@ -9,14 +9,13 @@ export type TotpManagerViewRenderMode =
 	| "availability"
 	| "body"
 	| "entries"
-	| "floating-lock"
 	| "full"
 	| "search";
 
 export interface TotpManagerViewRendererActions {
 	onAddEntry: () => void;
 	onBulkImport: () => void;
-	onCardClick: (entry: TotpEntryRecord, event: MouseEvent) => void;
+	onCardClick: (entry: TotpEntryRecord, card: HTMLElement, event: MouseEvent) => void;
 	onCardContextMenu: (entry: TotpEntryRecord, event: MouseEvent) => void;
 	onCardKeyDown: (
 		entry: TotpEntryRecord,
@@ -40,7 +39,7 @@ export interface TotpManagerViewRendererActions {
 	onCreateVault: () => void;
 	onDeleteSelected: () => void;
 	onExitSelectionMode: () => void;
-	onLockVault: () => void;
+	onOpenMoreMenu: (target: HTMLElement) => void;
 	onSearchQueryChange: (query: string) => void;
 	onSelectAllVisible: () => void;
 	onUnlockVault: () => void;
@@ -51,7 +50,6 @@ export interface TotpManagerViewRenderContext {
 	isUnlocked: boolean;
 	isVaultInitialized: boolean;
 	showUpcomingCodes: boolean;
-	showFloatingLockButton: boolean;
 	vaultLoadIssue: VaultLoadIssue | null;
 }
 
@@ -71,11 +69,10 @@ export class TotpManagerViewRenderer {
 	private readonly setUiIcon: (element: HTMLElement, icon: string) => void;
 	private contentEl: HTMLElement | null = null;
 	private dockEl: HTMLElement | null = null;
-	private dockStatusEl: HTMLElement | null = null;
+	private dockMetaEl: HTMLElement | null = null;
 	private dockActionsEl: HTMLElement | null = null;
 	private bodyEl: HTMLElement | null = null;
 	private searchInputEl: HTMLInputElement | null = null;
-	private floatingLockContainerEl: HTMLElement | null = null;
 	private renderedAvailability: ViewAvailabilityState | null = null;
 	private renderedVisibleEntryIds: string[] = [];
 	private readonly renderedCards = new Map<string, HTMLElement>();
@@ -109,12 +106,6 @@ export class TotpManagerViewRenderer {
 		this.ensureLayout(contentEl);
 
 		const availability = this.getAvailabilityState(context);
-		const shouldRenderFloatingLock =
-			context.isVaultInitialized &&
-			context.isUnlocked &&
-			context.showFloatingLockButton;
-
-		contentEl.toggleClass("has-floating-lock", shouldRenderFloatingLock);
 
 		if (availability !== "ready") {
 			this.state.resetForUnavailableVault();
@@ -137,7 +128,6 @@ export class TotpManagerViewRenderer {
 			this.syncVisibleCardSelectionState();
 		}
 
-		this.renderFloatingLockContainer(shouldRenderFloatingLock);
 		this.renderedAvailability = availability;
 		this.renderedVisibleEntryIds = visibleEntryIds;
 		this.codeRefresh.syncDragState(availability === "ready" ? this.state.getDragState() : null);
@@ -171,7 +161,11 @@ export class TotpManagerViewRenderer {
 	private renderCommandDock(availability: ViewAvailabilityState): void {
 		this.dockEl?.toggleClass("is-selection-mode", this.state.isSelectionMode());
 		this.dockEl?.toggleClass("is-unavailable", availability !== "ready");
-		this.dockStatusEl?.setText(this.getDockStatusText(availability));
+		this.dockMetaEl?.setText(this.getDockMetaText(availability));
+		this.dockMetaEl?.toggleClass(
+			"is-status",
+			availability !== "ready",
+		);
 		this.dockActionsEl?.empty();
 
 		if (!this.dockActionsEl) {
@@ -192,7 +186,7 @@ export class TotpManagerViewRenderer {
 		}
 	}
 
-	private getDockStatusText(availability: ViewAvailabilityState): string {
+	private getDockMetaText(availability: ViewAvailabilityState): string {
 		if (availability === "load-error") {
 			return this.plugin.t("view.loadError.title");
 		}
@@ -216,17 +210,21 @@ export class TotpManagerViewRenderer {
 
 		const visibleEntryCount = this.state.getVisibleEntries().length;
 		return visibleEntryCount === 1
-			? this.plugin.t("view.summary.one", {
+			? this.plugin.t("view.meta.entries.one", {
 				count: visibleEntryCount,
 			})
-			: this.plugin.t("view.summary.other", {
+			: this.plugin.t("view.meta.entries.other", {
 				count: visibleEntryCount,
 			});
 	}
 
 	private renderPrimaryActions(actionsEl: HTMLElement, isInteractive: boolean): void {
 		this.createActionPillButton(actionsEl, {
-			extraClasses: ["twofa-action-pill--compact"],
+			extraClasses: [
+				"twofa-action-pill--compact",
+				"twofa-action-pill--toolbar",
+				"clickable-icon",
+			],
 			icon: "plus",
 			isInteractive,
 			label: this.plugin.t("common.addEntry"),
@@ -235,13 +233,18 @@ export class TotpManagerViewRenderer {
 			},
 			variant: "primary",
 		});
-		this.createActionPillButton(actionsEl, {
-			extraClasses: ["twofa-action-pill--compact"],
-			icon: "import",
+		let moreButton!: HTMLButtonElement;
+		moreButton = this.createActionPillButton(actionsEl, {
+			extraClasses: [
+				"twofa-action-pill--compact",
+				"twofa-action-pill--toolbar",
+				"clickable-icon",
+			],
+			icon: "more-horizontal",
 			isInteractive,
-			label: this.plugin.t("common.bulkImport"),
+			label: this.plugin.t("common.more"),
 			onClick: () => {
-				this.actions.onBulkImport();
+				this.actions.onOpenMoreMenu(moreButton);
 			},
 			variant: "secondary",
 		});
@@ -251,7 +254,11 @@ export class TotpManagerViewRenderer {
 		const selectedCount = this.state.getSelectedCount();
 		const shouldClearVisibleSelection = this.state.areAllVisibleEntriesSelected();
 		this.createActionPillButton(actionsEl, {
-			extraClasses: ["twofa-action-pill--compact"],
+			extraClasses: [
+				"twofa-action-pill--compact",
+				"twofa-action-pill--toolbar",
+				"clickable-icon",
+			],
 			icon: shouldClearVisibleSelection ? "square-x" : "check-check",
 			isInteractive: this.state.getVisibleEntries().length > 0,
 			label: shouldClearVisibleSelection
@@ -263,7 +270,11 @@ export class TotpManagerViewRenderer {
 			variant: "secondary",
 		});
 		this.createActionPillButton(actionsEl, {
-			extraClasses: ["twofa-action-pill--compact"],
+			extraClasses: [
+				"twofa-action-pill--compact",
+				"twofa-action-pill--toolbar",
+				"clickable-icon",
+			],
 			icon: "trash-2",
 			isInteractive: selectedCount > 0,
 			label: this.plugin.t("common.deleteSelected"),
@@ -273,7 +284,11 @@ export class TotpManagerViewRenderer {
 			variant: "danger",
 		});
 		this.createActionPillButton(actionsEl, {
-			extraClasses: ["twofa-action-pill--compact"],
+			extraClasses: [
+				"twofa-action-pill--compact",
+				"twofa-action-pill--toolbar",
+				"clickable-icon",
+			],
 			icon: "x",
 			isInteractive: true,
 			label: this.plugin.t("common.cancel"),
@@ -314,68 +329,50 @@ export class TotpManagerViewRenderer {
 	}
 
 	private renderLoadErrorState(contentEl: HTMLElement): void {
-		const wrapper = contentEl.createDiv({
-			cls: "twofa-state-panel",
-		});
-		wrapper.createEl("h3", {
-			text: this.plugin.t("view.loadError.title"),
-		});
-		wrapper.createEl("p", {
-			text: this.plugin.t("view.loadError.description"),
-		});
-		const actions = wrapper.createDiv({
-			cls: "twofa-inline-actions",
-		});
-		const clearButton = actions.createEl("button", {
-			cls: "mod-warning",
-			text: this.plugin.t("common.clearVault"),
-		});
-		clearButton.addEventListener("click", () => {
-			this.actions.onClearVault();
+		this.renderStatePanel(contentEl, {
+			description: this.plugin.t("view.loadError.description"),
+			title: this.plugin.t("view.loadError.title"),
+			actions: [
+				{
+					label: this.plugin.t("common.clearVault"),
+					onClick: () => {
+						this.actions.onClearVault();
+					},
+					variant: "danger",
+				},
+			],
 		});
 	}
 
 	private renderUninitializedState(contentEl: HTMLElement): void {
-		const wrapper = contentEl.createDiv({
-			cls: "twofa-state-panel",
-		});
-		wrapper.createEl("h3", {
-			text: this.plugin.t("view.uninitialized.title"),
-		});
-		wrapper.createEl("p", {
-			text: this.plugin.t("view.uninitialized.description"),
-		});
-		const actions = wrapper.createDiv({
-			cls: "twofa-inline-actions",
-		});
-		const initializeButton = actions.createEl("button", {
-			cls: "mod-cta",
-			text: this.plugin.t("common.createVault"),
-		});
-		initializeButton.addEventListener("click", () => {
-			this.actions.onCreateVault();
+		this.renderStatePanel(contentEl, {
+			description: this.plugin.t("view.uninitialized.description"),
+			title: this.plugin.t("view.uninitialized.title"),
+			actions: [
+				{
+					label: this.plugin.t("common.createVault"),
+					onClick: () => {
+						this.actions.onCreateVault();
+					},
+					variant: "primary",
+				},
+			],
 		});
 	}
 
 	private renderLockedState(contentEl: HTMLElement): void {
-		const wrapper = contentEl.createDiv({
-			cls: "twofa-state-panel",
-		});
-		wrapper.createEl("h3", {
-			text: this.plugin.t("view.locked.title"),
-		});
-		wrapper.createEl("p", {
-			text: this.plugin.t("view.locked.description"),
-		});
-		const actions = wrapper.createDiv({
-			cls: "twofa-inline-actions",
-		});
-		const unlockButton = actions.createEl("button", {
-			cls: "mod-cta",
-			text: this.plugin.t("common.unlockVault"),
-		});
-		unlockButton.addEventListener("click", () => {
-			this.actions.onUnlockVault();
+		this.renderStatePanel(contentEl, {
+			description: this.plugin.t("view.locked.description"),
+			title: this.plugin.t("view.locked.title"),
+			actions: [
+				{
+					label: this.plugin.t("common.unlockVault"),
+					onClick: () => {
+						this.actions.onUnlockVault();
+					},
+					variant: "primary",
+				},
+			],
 		});
 	}
 
@@ -390,6 +387,7 @@ export class TotpManagerViewRenderer {
 				cls: "twofa-state-panel twofa-state-panel--compact",
 			});
 			emptyState.createEl("p", {
+				cls: "twofa-state-panel__description",
 				text:
 					this.state.getSearchQuery().trim().length > 0
 						? this.plugin.t("view.empty.search")
@@ -408,24 +406,6 @@ export class TotpManagerViewRenderer {
 		}
 	}
 
-	private renderFloatingLockContainer(shouldRenderFloatingLock: boolean): void {
-		this.floatingLockContainerEl?.empty();
-		if (!this.floatingLockContainerEl || !shouldRenderFloatingLock) {
-			return;
-		}
-
-		this.createActionPillButton(this.floatingLockContainerEl, {
-			extraClasses: ["twofa-floating-lock-button"],
-			icon: "lock",
-			isInteractive: true,
-			label: this.plugin.t("common.lock"),
-			onClick: () => {
-				this.actions.onLockVault();
-			},
-			variant: "secondary",
-		});
-	}
-
 	private ensureLayout(contentEl: HTMLElement): void {
 		if (this.contentEl === contentEl && this.dockEl && this.bodyEl && this.searchInputEl) {
 			return;
@@ -434,18 +414,35 @@ export class TotpManagerViewRenderer {
 		this.contentEl = contentEl;
 		this.contentEl.empty();
 		this.contentEl.addClass("twofa-view");
+		const shellEl = this.contentEl.createDiv({
+			cls: "twofa-view__shell",
+		});
 
-		this.dockEl = this.contentEl.createDiv({
+		this.dockEl = shellEl.createDiv({
 			cls: "twofa-command-dock",
 		});
 		const topRow = this.dockEl.createDiv({
 			cls: "twofa-command-dock__row twofa-command-dock__row--top",
 		});
-		const titleCluster = topRow.createDiv({
-			cls: "twofa-command-dock__title-cluster",
+		const searchShell = topRow.createDiv({
+			cls: "twofa-search-shell",
 		});
-		this.dockStatusEl = titleCluster.createDiv({
-			cls: "twofa-command-dock__status",
+		const searchInner = searchShell.createDiv({
+			cls: "twofa-search-shell__inner search-input-container",
+		});
+		const iconEl = searchInner.createSpan({
+			cls: "twofa-search-shell__icon",
+		});
+		iconEl.setAttribute("aria-hidden", "true");
+		this.setUiIcon(iconEl, "search");
+		this.searchInputEl = searchInner.createEl("input", {
+			type: "search",
+			placeholder: this.plugin.t("view.search.placeholder"),
+		});
+		this.searchInputEl.addClass("twofa-search-input");
+		this.searchInputEl.addClass("search-input");
+		this.searchInputEl.addEventListener("input", (event) => {
+			this.actions.onSearchQueryChange((event.target as HTMLInputElement).value);
 		});
 		this.dockActionsEl = topRow.createDiv({
 			cls: "twofa-command-dock__actions",
@@ -453,26 +450,69 @@ export class TotpManagerViewRenderer {
 		const bottomRow = this.dockEl.createDiv({
 			cls: "twofa-command-dock__row twofa-command-dock__row--bottom",
 		});
-		const searchShell = bottomRow.createDiv({
-			cls: "twofa-search-shell",
+		const metaCluster = bottomRow.createDiv({
+			cls: "twofa-command-dock__title-cluster",
 		});
-		const iconEl = searchShell.createSpan({
-			cls: "twofa-search-shell__icon",
+		this.dockMetaEl = metaCluster.createDiv({
+			cls: "twofa-command-dock__meta",
 		});
-		iconEl.setAttribute("aria-hidden", "true");
-		this.setUiIcon(iconEl, "search");
-		this.searchInputEl = searchShell.createEl("input", {
-			type: "search",
-			placeholder: this.plugin.t("view.search.placeholder"),
-		});
-		this.searchInputEl.addClass("twofa-search-input");
-		this.searchInputEl.addEventListener("input", (event) => {
-			this.actions.onSearchQueryChange((event.target as HTMLInputElement).value);
-		});
-		this.bodyEl = this.contentEl.createDiv({
+		this.bodyEl = shellEl.createDiv({
 			cls: "twofa-view__body",
 		});
-		this.floatingLockContainerEl = this.contentEl.createDiv();
+	}
+
+	private renderStatePanel(
+		contentEl: HTMLElement,
+		options: {
+			actions: Array<{
+				label: string;
+				onClick: () => void;
+				variant: "danger" | "primary" | "secondary";
+			}>;
+			description: string;
+			title: string;
+		},
+	): void {
+		const wrapper = contentEl.createDiv({
+			cls: "twofa-state-panel",
+		});
+		const body = wrapper.createDiv({
+			cls: "twofa-state-panel__body",
+		});
+		body.createEl("h3", {
+			cls: "twofa-state-panel__title",
+			text: options.title,
+		});
+		body.createEl("p", {
+			cls: "twofa-state-panel__description",
+			text: options.description,
+		});
+
+		if (options.actions.length === 0) {
+			return;
+		}
+
+		const actionsEl = wrapper.createDiv({
+			cls: "twofa-inline-actions twofa-state-panel__actions",
+		});
+		for (const action of options.actions) {
+			const button = actionsEl.createEl("button", {
+				cls: [
+					"twofa-state-panel__action",
+					`twofa-state-panel__action--${action.variant}`,
+					action.variant === "primary"
+						? "mod-cta"
+						: action.variant === "danger"
+							? "mod-warning"
+							: "",
+				].join(" "),
+				text: action.label,
+			});
+			button.type = "button";
+			button.addEventListener("click", () => {
+				action.onClick();
+			});
+		}
 	}
 
 	private shouldRebuildBody(
