@@ -142,6 +142,7 @@ function createRendererHarness() {
 			syncDragState: () => {
 				dragStateCalls += 1;
 			},
+			unregisterRow: () => {},
 		},
 		actions,
 		{
@@ -429,9 +430,61 @@ test("TotpManagerViewRenderer preserves the search input node across non-destruc
 	);
 
 	assert.equal(harness.root.findByClass("twofa-search-input"), initialSearchInput);
-	assert.equal(harness.getResetRowsCalls(), 2);
+	assert.equal(harness.getResetRowsCalls(), 1);
 	assert.ok(collectTextContent(harness.root).includes('view.meta.entries.one:{"count":1}'));
 	assert.equal(collectElements(harness.root, (element) => element.hasClass("twofa-entry-card")).length, 1);
+});
+
+test("TotpManagerViewRenderer reuses existing card nodes when ready entries update without a layout change", () => {
+	const harness = createRendererHarness();
+	const initialContext = {
+		entries: harness.entries,
+		isUnlocked: true,
+		isVaultInitialized: true,
+		showUpcomingCodes: false,
+		vaultLoadIssue: null,
+	} satisfies Parameters<TotpManagerViewRenderer["render"]>[1];
+
+	harness.renderer.render(harness.root as unknown as HTMLElement, initialContext);
+
+	const initialCards = collectElements(
+		harness.root,
+		(element) => element.hasClass("twofa-entry-card"),
+	);
+	const firstCard = initialCards[0];
+	assert.ok(firstCard);
+
+	const updatedEntries = [
+		createEntry("entry-1", {
+			accountName: "updated@example.com",
+			issuer: "",
+		}),
+		createEntry("entry-2"),
+	];
+
+	harness.renderer.render(
+		harness.root as unknown as HTMLElement,
+		{
+			...initialContext,
+			entries: updatedEntries,
+		},
+		"entries",
+	);
+
+	const nextCards = collectElements(
+		harness.root,
+		(element) => element.hasClass("twofa-entry-card"),
+	);
+	assert.equal(nextCards[0], firstCard);
+	assert.equal(
+		nextCards[0]?.findByClass("twofa-entry-card__title")?.textContent,
+		"updated@example.com",
+	);
+	assert.equal(
+		nextCards[0]?.findByClass("twofa-entry-card__subtitle"),
+		null,
+	);
+	assert.equal(harness.getResetRowsCalls(), 1);
 });
 
 test("TotpManagerViewRenderer renders entries without legacy floating-lock UI", () => {

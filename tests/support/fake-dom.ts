@@ -66,6 +66,16 @@ export class FakeElement {
 		return this.createEl("span", options);
 	}
 
+	appendChild(child: FakeElement): FakeElement {
+		if (child.parentElement) {
+			child.parentElement.removeChild(child);
+		}
+
+		child.parentElement = this;
+		this.children.push(child);
+		return child;
+	}
+
 	addClass(...classes: string[]): void {
 		for (const className of classes) {
 			if (className.length === 0) {
@@ -93,8 +103,30 @@ export class FakeElement {
 	}
 
 	empty(): void {
+		for (const child of this.children) {
+			child.parentElement = null;
+		}
 		this.children.length = 0;
 		this.textContent = "";
+	}
+
+	insertBefore(child: FakeElement, referenceChild: FakeElement | null): FakeElement {
+		if (referenceChild === null) {
+			return this.appendChild(child);
+		}
+
+		const referenceIndex = this.children.indexOf(referenceChild);
+		if (referenceIndex === -1) {
+			return this.appendChild(child);
+		}
+
+		if (child.parentElement) {
+			child.parentElement.removeChild(child);
+		}
+
+		child.parentElement = this;
+		this.children.splice(referenceIndex, 0, child);
+		return child;
 	}
 
 	findByClass(className: string): FakeElement | null {
@@ -179,6 +211,20 @@ export class FakeElement {
 
 	removeClass(value: string): void {
 		this.classList.delete(value);
+	}
+
+	removeChild(child: FakeElement): FakeElement {
+		const childIndex = this.children.indexOf(child);
+		if (childIndex >= 0) {
+			this.children.splice(childIndex, 1);
+			child.parentElement = null;
+		}
+
+		return child;
+	}
+
+	remove(): void {
+		this.parentElement?.removeChild(this);
 	}
 
 	setBoundingClientRect(rect: {

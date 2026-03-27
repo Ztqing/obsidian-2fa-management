@@ -11,6 +11,7 @@ import {
 	type TotpManagerViewRendererActions,
 	type TotpManagerViewRenderMode,
 } from "./totp-manager-view-renderer";
+import { bindViewSessionActivity } from "./totp-manager-view-session-activity";
 import { TotpManagerViewState } from "./totp-manager-view-state";
 
 export class TotpManagerView extends ItemView {
@@ -57,6 +58,9 @@ export class TotpManagerView extends ItemView {
 		this.addAction("lock", this.plugin.t("command.lockVault"), () => {
 			this.controller.lockVault();
 		});
+		bindViewSessionActivity(this, this.contentEl, () => {
+			this.plugin.recordSessionActivity();
+		});
 		this.registerDomEvent(window, "pointerup", (event) => {
 			void this.controller.handleGlobalPointerEnd(event);
 		});
@@ -79,6 +83,7 @@ export class TotpManagerView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.state.resetForUnavailableVault();
+		this.controller.destroy();
 		this.codeRefresh.destroy();
 		await super.onClose();
 	}

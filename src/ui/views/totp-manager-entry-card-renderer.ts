@@ -22,12 +22,92 @@ function clearAttribute(element: HTMLElement, name: string): void {
 	attributes?.delete(name);
 }
 
+function syncTextContent(element: HTMLElement, value: string): void {
+	const fakeElement = element as HTMLElement & {
+		textContent?: string;
+		setText?: (text: string) => void;
+	};
+	if (fakeElement.textContent === value) {
+		return;
+	}
+
+	if (typeof fakeElement.setText === "function") {
+		fakeElement.setText(value);
+		return;
+	}
+
+	element.textContent = value;
+}
+
+function appendChildElement(parentEl: HTMLElement, childEl: HTMLElement): void {
+	const nextParent = parentEl as HTMLElement & {
+		appendChild?: (child: HTMLElement) => void;
+	};
+	if (typeof nextParent.appendChild === "function") {
+		nextParent.appendChild(childEl);
+		return;
+	}
+
+	parentEl.append(childEl);
+}
+
+function createDivElement(parentEl: HTMLElement, className: string): HTMLElement {
+	const fakeParent = parentEl as HTMLElement & {
+		createEl?: (
+			tagName: string,
+			options?: {
+				cls?: string;
+			},
+		) => HTMLElement;
+	};
+	if (typeof fakeParent.createEl === "function") {
+		return fakeParent.createEl("div", {
+			cls: className,
+		});
+	}
+
+	const element = document.createElement("div");
+	element.className = className;
+	appendChildElement(parentEl, element);
+	return element;
+}
+
+function removeElement(element: HTMLElement): void {
+	const removable = element as HTMLElement & {
+		remove?: () => void;
+		parentElement?: {
+			removeChild?: (child: HTMLElement) => void;
+		} | null;
+	};
+	if (typeof removable.remove === "function") {
+		removable.remove();
+		return;
+	}
+
+	removable.parentElement?.removeChild?.(element);
+}
+
+export interface RenderedEntryCard {
+	cardEl: HTMLElement;
+}
+
+interface RenderedEntryCardBinding {
+	cardEl: HTMLElement;
+	entry: TotpEntryRecord;
+	providerIconEl: HTMLElement;
+	refs: EntryRowRefs;
+	subtitleEl: HTMLElement | null;
+	titleEl: HTMLElement;
+	titleId: string;
+}
+
 export interface TotpManagerEntryCardRendererDependencies {
 	resolveProviderIcon?: (entry: TotpEntryRecord) => string;
 	setProviderIcon?: (element: HTMLElement, icon: string) => void;
 }
 
 export class TotpManagerEntryCardRenderer {
+	private readonly bindings = new WeakMap<HTMLElement, RenderedEntryCardBinding>();
 	private readonly resolveProviderIcon: (entry: TotpEntryRecord) => string;
 	private readonly setProviderIcon: (element: HTMLElement, icon: string) => void;
 
@@ -47,106 +127,55 @@ export class TotpManagerEntryCardRenderer {
 		listEl: HTMLElement,
 		entry: TotpEntryRecord,
 		showUpcomingCodes: boolean,
-	): HTMLElement {
-		const card = listEl.createDiv({
+	): RenderedEntryCard {
+		const cardEl = listEl.createDiv({
 			cls: "twofa-entry-card",
 		});
-		card.tabIndex = 0;
-		this.syncCardSelectionState(card, entry.id);
+		cardEl.tabIndex = 0;
 
-		card.addEventListener("pointerdown", (event) => {
-			this.actions.onCardPointerDown(entry, event);
-		});
-		card.addEventListener("pointermove", (event) => {
-			this.actions.onCardPointerMove(entry, card, event);
-		});
-		card.addEventListener("pointerup", (event) => {
-			this.actions.onCardPointerEnd(entry, card, event);
-		});
-		card.addEventListener("pointerleave", (event) => {
-			this.actions.onCardPointerLeave(event);
-		});
-		card.addEventListener("pointercancel", (event) => {
-			this.actions.onCardPointerCancel(event);
-		});
-		card.addEventListener("click", (event) => {
-			this.actions.onCardClick(entry, card, event);
-		});
-		card.addEventListener("contextmenu", (event) => {
-			this.actions.onCardContextMenu(entry, event);
-		});
-		card.addEventListener("keydown", (event) => {
-			this.actions.onCardKeyDown(entry, card, event);
-		});
-
-		const header = card.createDiv({
+		const headerEl = cardEl.createDiv({
 			cls: "twofa-entry-card__header",
 		});
-		const identity = header.createDiv({
+		const identityEl = headerEl.createDiv({
 			cls: "twofa-entry-card__identity",
 		});
-		const providerIcon = identity.createDiv({
+		const providerIconEl = identityEl.createDiv({
 			cls: "twofa-entry-card__provider-icon",
 		});
-		providerIcon.setAttribute("aria-hidden", "true");
-		const providerIconId = this.resolveProviderIcon(entry);
-		providerIcon.setAttribute("data-provider-icon", providerIconId);
-		card.setAttribute("data-provider-icon", providerIconId);
-		this.setProviderIcon(providerIcon, providerIconId);
-
-		const titleBlock = identity.createDiv({
+		providerIconEl.setAttribute("aria-hidden", "true");
+		const titleBlockEl = identityEl.createDiv({
 			cls: "twofa-entry-card__title-block",
 		});
 		const titleId = `twofa-entry-title-${entry.id}`;
-		const titleEl = titleBlock.createEl("div", {
+		const titleEl = titleBlockEl.createEl("div", {
 			cls: "twofa-entry-card__title",
-			text: entry.issuer || entry.accountName,
 		});
 		titleEl.setAttribute("id", titleId);
-		const labelledByIds = [titleId];
 
-		const statusRail = header.createDiv({
+		const statusRailEl = headerEl.createDiv({
 			cls: "twofa-entry-card__status-rail",
 		});
-		const countdownBadgeEl = statusRail.createDiv({
+		const countdownBadgeEl = statusRailEl.createDiv({
 			cls: "twofa-entry-card__countdown-badge",
 		});
-		countdownBadgeEl.setAttribute(
-			"aria-label",
-			this.plugin.t("view.entry.countdown", {
-				seconds: 0,
-			}),
-		);
 		const countdownEl = countdownBadgeEl.createDiv({
 			cls: "twofa-entry-card__countdown",
 			text: "...",
 		});
 
-		if (entry.issuer) {
-			const subtitleId = `twofa-entry-subtitle-${entry.id}`;
-			const subtitleEl = titleBlock.createEl("div", {
-				cls: "twofa-entry-card__subtitle",
-				text: entry.accountName,
-			});
-			subtitleEl.setAttribute("id", subtitleId);
-			labelledByIds.push(subtitleId);
-		}
-
-		card.setAttribute("aria-labelledby", labelledByIds.join(" "));
-
-		const codeSection = card.createDiv({
+		const codeSectionEl = cardEl.createDiv({
 			cls: "twofa-entry-card__code-section",
 		});
-		const codeRow = codeSection.createDiv({
+		const codeRowEl = codeSectionEl.createDiv({
 			cls: "twofa-entry-card__code-row",
 		});
-		const codeCluster = codeRow.createDiv({
+		const codeClusterEl = codeRowEl.createDiv({
 			cls: "twofa-entry-card__code-cluster",
 		});
-		const codePrimary = codeCluster.createDiv({
+		const codePrimaryEl = codeClusterEl.createDiv({
 			cls: "twofa-entry-card__code-primary",
 		});
-		const codeEl = codePrimary.createEl("code", {
+		const codeEl = codePrimaryEl.createEl("code", {
 			cls: "twofa-entry-card__code",
 		});
 		renderStaticCode(codeEl, CODE_PLACEHOLDER);
@@ -154,7 +183,7 @@ export class TotpManagerEntryCardRenderer {
 		let nextCodeEl: HTMLElement | null = null;
 		let nextCodeRowEl: HTMLElement | null = null;
 		if (showUpcomingCodes) {
-			nextCodeRowEl = codeCluster.createDiv({
+			nextCodeRowEl = codeClusterEl.createDiv({
 				cls: "twofa-entry-card__next-code-row is-visible",
 			});
 			nextCodeRowEl.setAttribute("aria-label", this.plugin.t("view.entry.nextCode"));
@@ -166,7 +195,7 @@ export class TotpManagerEntryCardRenderer {
 
 		const refs: EntryRowRefs = {
 			activeTransitionEl: null,
-			cardEl: card,
+			cardEl,
 			codeAnimationTimeoutId: null,
 			codeAnimationToken: 0,
 			codeEl,
@@ -176,8 +205,33 @@ export class TotpManagerEntryCardRenderer {
 			nextCodeRowEl,
 			previousCurrentCode: null,
 		};
+		const binding: RenderedEntryCardBinding = {
+			cardEl,
+			entry,
+			providerIconEl,
+			refs,
+			subtitleEl: null,
+			titleEl,
+			titleId,
+		};
+		this.bindings.set(cardEl, binding);
+		this.bindCardEvents(binding);
+		this.syncEntryCard(binding, entry);
 		this.codeRefresh.registerRow(entry, refs);
-		return card;
+		return {
+			cardEl,
+		};
+	}
+
+	updateEntryCard(renderedCard: RenderedEntryCard, entry: TotpEntryRecord): void {
+		const binding = this.bindings.get(renderedCard.cardEl);
+		if (!binding) {
+			return;
+		}
+
+		binding.entry = entry;
+		this.syncEntryCard(binding, entry);
+		this.codeRefresh.registerRow(entry, binding.refs);
 	}
 
 	syncCardSelectionState(card: HTMLElement, entryId: string): void {
@@ -193,5 +247,88 @@ export class TotpManagerEntryCardRenderer {
 		}
 
 		clearAttribute(card, "aria-checked");
+	}
+
+	private bindCardEvents(binding: RenderedEntryCardBinding): void {
+		const { cardEl } = binding;
+		cardEl.addEventListener("pointerdown", (event) => {
+			this.actions.onCardPointerDown(binding.entry, event);
+		});
+		cardEl.addEventListener("pointermove", (event) => {
+			this.actions.onCardPointerMove(binding.entry, cardEl, event);
+		});
+		cardEl.addEventListener("pointerup", (event) => {
+			this.actions.onCardPointerEnd(binding.entry, cardEl, event);
+		});
+		cardEl.addEventListener("pointerleave", (event) => {
+			this.actions.onCardPointerLeave(event);
+		});
+		cardEl.addEventListener("pointercancel", (event) => {
+			this.actions.onCardPointerCancel(event);
+		});
+		cardEl.addEventListener("click", (event) => {
+			this.actions.onCardClick(binding.entry, cardEl, event);
+		});
+		cardEl.addEventListener("contextmenu", (event) => {
+			this.actions.onCardContextMenu(binding.entry, event);
+		});
+		cardEl.addEventListener("keydown", (event) => {
+			this.actions.onCardKeyDown(binding.entry, cardEl, event);
+		});
+	}
+
+	private syncEntryCard(
+		binding: RenderedEntryCardBinding,
+		entry: TotpEntryRecord,
+	): void {
+		this.syncProviderIcon(binding, entry);
+		this.syncTitleBlock(binding, entry);
+		this.syncCardSelectionState(binding.cardEl, entry.id);
+	}
+
+	private syncProviderIcon(
+		binding: RenderedEntryCardBinding,
+		entry: TotpEntryRecord,
+	): void {
+		const providerIconId = this.resolveProviderIcon(entry);
+		if (binding.cardEl.getAttribute("data-provider-icon") === providerIconId) {
+			return;
+		}
+
+		binding.providerIconEl.setAttribute("data-provider-icon", providerIconId);
+		binding.cardEl.setAttribute("data-provider-icon", providerIconId);
+		this.setProviderIcon(binding.providerIconEl, providerIconId);
+	}
+
+	private syncTitleBlock(
+		binding: RenderedEntryCardBinding,
+		entry: TotpEntryRecord,
+	): void {
+		syncTextContent(binding.titleEl, entry.issuer || entry.accountName);
+
+		if (entry.issuer) {
+			if (!binding.subtitleEl) {
+				binding.subtitleEl = createDivElement(
+					binding.titleEl.parentElement as HTMLElement,
+					"twofa-entry-card__subtitle",
+				);
+			}
+
+			const subtitleId = `twofa-entry-subtitle-${entry.id}`;
+			binding.subtitleEl.setAttribute("id", subtitleId);
+			syncTextContent(binding.subtitleEl, entry.accountName);
+			binding.cardEl.setAttribute(
+				"aria-labelledby",
+				`${binding.titleId} ${subtitleId}`,
+			);
+			return;
+		}
+
+		if (binding.subtitleEl) {
+			removeElement(binding.subtitleEl);
+			binding.subtitleEl = null;
+		}
+
+		binding.cardEl.setAttribute("aria-labelledby", binding.titleId);
 	}
 }

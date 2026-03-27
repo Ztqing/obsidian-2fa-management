@@ -1,7 +1,10 @@
 import { setIcon } from "obsidian";
 import type TwoFactorManagementPlugin from "../../plugin";
 import type { TotpEntryRecord, VaultLoadIssue } from "../../types";
-import { TotpManagerEntryCardRenderer } from "./totp-manager-entry-card-renderer";
+import {
+	type RenderedEntryCard,
+	TotpManagerEntryCardRenderer,
+} from "./totp-manager-entry-card-renderer";
 import type { TotpCodeRefreshController } from "./totp-manager-view-code-refresh";
 import type { TotpManagerViewState } from "./totp-manager-view-state";
 
@@ -64,6 +67,33 @@ export interface TotpManagerViewRenderResult {
 	shouldRefreshVisibleCodes: boolean;
 }
 
+function appendChildElement(parentEl: HTMLElement, childEl: HTMLElement): void {
+	const nextParent = parentEl as HTMLElement & {
+		appendChild?: (child: HTMLElement) => void;
+	};
+	if (typeof nextParent.appendChild === "function") {
+		nextParent.appendChild(childEl);
+		return;
+	}
+
+	parentEl.append(childEl);
+}
+
+function removeElement(element: HTMLElement): void {
+	const removable = element as HTMLElement & {
+		remove?: () => void;
+		parentElement?: {
+			removeChild?: (child: HTMLElement) => void;
+		} | null;
+	};
+	if (typeof removable.remove === "function") {
+		removable.remove();
+		return;
+	}
+
+	removable.parentElement?.removeChild?.(element);
+}
+
 export class TotpManagerViewRenderer {
 	private readonly entryCardRenderer: TotpManagerEntryCardRenderer;
 	private readonly setUiIcon: (element: HTMLElement, icon: string) => void;
@@ -72,17 +102,19 @@ export class TotpManagerViewRenderer {
 	private dockMetaEl: HTMLElement | null = null;
 	private dockActionsEl: HTMLElement | null = null;
 	private bodyEl: HTMLElement | null = null;
+	private entryListEl: HTMLElement | null = null;
 	private searchInputEl: HTMLInputElement | null = null;
 	private renderedAvailability: ViewAvailabilityState | null = null;
 	private renderedVisibleEntryIds: string[] = [];
-	private readonly renderedCards = new Map<string, HTMLElement>();
+	private renderedShowUpcomingCodes: boolean | null = null;
+	private readonly renderedCards = new Map<string, RenderedEntryCard>();
 
 	constructor(
 		private readonly plugin: Pick<TwoFactorManagementPlugin, "t">,
 		private readonly state: TotpManagerViewState,
 		private readonly codeRefresh: Pick<
 			TotpCodeRefreshController,
-			"resetRows" | "registerRow" | "syncDragState"
+			"resetRows" | "registerRow" | "syncDragState" | "unregisterRow"
 		>,
 		private readonly actions: TotpManagerViewRendererActions,
 		dependencies: TotpManagerViewRendererDependencies = {},
@@ -115,27 +147,35 @@ export class TotpManagerViewRenderer {
 
 		this.renderCommandDock(availability);
 
-		const visibleEntryIds =
-			availability === "ready"
-				? this.state.getVisibleEntries().map((entry) => entry.id)
-				: [];
-		const shouldRebuildBody = this.shouldRebuildBody(mode, availability, visibleEntryIds);
+		const visibleEntries =
+			availability === "ready" ? this.state.getVisibleEntries() : [];
+		const visibleEntryIds = visibleEntries.map((entry) => entry.id);
+		const shouldRebuildBody = this.shouldRebuildBody(
+			availability,
+			visibleEntries,
+			context.showUpcomingCodes,
+		);
 
 		if (shouldRebuildBody) {
 			this.codeRefresh.resetRows();
-			this.renderBody(availability, context.showUpcomingCodes);
-		} else {
+			this.renderBody(availability, visibleEntries, context.showUpcomingCodes);
+		} else if (availability === "ready") {
+			this.syncVisibleEntryCards(visibleEntries);
 			this.syncVisibleCardSelectionState();
 		}
 
 		this.renderedAvailability = availability;
+		this.renderedShowUpcomingCodes =
+			availability === "ready" ? context.showUpcomingCodes : null;
 		this.renderedVisibleEntryIds = visibleEntryIds;
 		this.codeRefresh.syncDragState(availability === "ready" ? this.state.getDragState() : null);
 
 		return {
 			shouldRefreshVisibleCodes:
 				availability === "ready" &&
-				((mode === "availability" || mode === "full" || mode === "entries") ||
+				(mode === "availability" ||
+					mode === "entries" ||
+					mode === "full" ||
 					(mode === "search" && shouldRebuildBody)),
 		};
 	}
@@ -301,6 +341,7 @@ export class TotpManagerViewRenderer {
 
 	private renderBody(
 		availability: ViewAvailabilityState,
+		visibleEntries: readonly TotpEntryRecord[],
 		showUpcomingCodes: boolean,
 	): void {
 		if (!this.bodyEl) {
@@ -309,6 +350,7 @@ export class TotpManagerViewRenderer {
 
 		this.bodyEl.empty();
 		this.renderedCards.clear();
+		this.entryListEl = null;
 
 		if (availability === "load-error") {
 			this.renderLoadErrorState(this.bodyEl);
@@ -325,7 +367,7 @@ export class TotpManagerViewRenderer {
 			return;
 		}
 
-		this.renderUnlockedState(this.bodyEl, showUpcomingCodes);
+		this.renderUnlockedState(this.bodyEl, visibleEntries, showUpcomingCodes);
 	}
 
 	private renderLoadErrorState(contentEl: HTMLElement): void {
@@ -378,10 +420,9 @@ export class TotpManagerViewRenderer {
 
 	private renderUnlockedState(
 		contentEl: HTMLElement,
+		visibleEntries: readonly TotpEntryRecord[],
 		showUpcomingCodes: boolean,
 	): void {
-		const visibleEntries = this.state.getVisibleEntries();
-
 		if (visibleEntries.length === 0) {
 			const emptyState = contentEl.createDiv({
 				cls: "twofa-state-panel twofa-state-panel--compact",
@@ -399,10 +440,15 @@ export class TotpManagerViewRenderer {
 		const list = contentEl.createDiv({
 			cls: "twofa-entry-list",
 		});
+		this.entryListEl = list;
 
 		for (const entry of visibleEntries) {
-			const card = this.entryCardRenderer.renderEntryCard(list, entry, showUpcomingCodes);
-			this.renderedCards.set(entry.id, card);
+			const renderedCard = this.entryCardRenderer.renderEntryCard(
+				list,
+				entry,
+				showUpcomingCodes,
+			);
+			this.renderedCards.set(entry.id, renderedCard);
 		}
 	}
 
@@ -516,37 +562,73 @@ export class TotpManagerViewRenderer {
 	}
 
 	private shouldRebuildBody(
-		mode: TotpManagerViewRenderMode,
 		availability: ViewAvailabilityState,
-		visibleEntryIds: readonly string[],
+		visibleEntries: readonly TotpEntryRecord[],
+		showUpcomingCodes: boolean,
 	): boolean {
 		if (this.renderedAvailability !== availability) {
 			return true;
 		}
 
-		if (mode === "full" || mode === "entries" || mode === "availability") {
-			return true;
-		}
-
 		if (availability !== "ready") {
+			return false;
+		}
+
+		if (this.renderedShowUpcomingCodes !== showUpcomingCodes) {
 			return true;
 		}
 
-		if (visibleEntryIds.length !== this.renderedVisibleEntryIds.length) {
-			return true;
+		const isCurrentlyRenderingList = this.entryListEl !== null;
+		return (visibleEntries.length === 0) === isCurrentlyRenderingList;
+	}
+
+	private syncVisibleEntryCards(
+		visibleEntries: readonly TotpEntryRecord[],
+	): void {
+		if (!this.entryListEl) {
+			return;
 		}
 
-		return visibleEntryIds.some((entryId, index) => entryId !== this.renderedVisibleEntryIds[index]);
+		const visibleEntryIds = new Set(visibleEntries.map((entry) => entry.id));
+		for (const [entryId, renderedCard] of this.renderedCards) {
+			if (visibleEntryIds.has(entryId)) {
+				continue;
+			}
+
+			this.codeRefresh.unregisterRow(entryId);
+			this.renderedCards.delete(entryId);
+			removeElement(renderedCard.cardEl);
+		}
+
+		for (const entry of visibleEntries) {
+			const existingCard = this.renderedCards.get(entry.id);
+			if (existingCard) {
+				this.entryCardRenderer.updateEntryCard(existingCard, entry);
+				appendChildElement(this.entryListEl, existingCard.cardEl);
+				continue;
+			}
+
+			const renderedCard = this.entryCardRenderer.renderEntryCard(
+				this.entryListEl,
+				entry,
+				this.renderedShowUpcomingCodes ?? false,
+			);
+			this.renderedCards.set(entry.id, renderedCard);
+			appendChildElement(this.entryListEl, renderedCard.cardEl);
+		}
 	}
 
 	private syncVisibleCardSelectionState(): void {
 		for (const entry of this.state.getVisibleEntries()) {
-			const card = this.renderedCards.get(entry.id);
-			if (!card) {
+			const renderedCard = this.renderedCards.get(entry.id);
+			if (!renderedCard) {
 				continue;
 			}
 
-			this.entryCardRenderer.syncCardSelectionState(card, entry.id);
+			this.entryCardRenderer.syncCardSelectionState(
+				renderedCard.cardEl,
+				entry.id,
+			);
 		}
 	}
 

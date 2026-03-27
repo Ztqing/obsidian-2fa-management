@@ -231,6 +231,52 @@ test("TotpCodeRefreshController keeps the next code visible when upcoming codes 
 	assert.equal((refs.nextCodeRowEl as unknown as FakeElement).hasClass("is-visible"), true);
 });
 
+test("TotpCodeRefreshController skips redundant DOM writes when the cached snapshot is unchanged", async () => {
+	const entry = createEntry("entry-1");
+	const { refs } = createRowRefs();
+	const snapshot = {
+		counter: 1,
+		currentCode: "222222",
+		hasNextCode: true,
+		isRefreshingSoon: false,
+		nextCode: "333333",
+		nextCounter: 2,
+		period: 30,
+		progressPercent: 20,
+		secondsRemaining: 24,
+	} satisfies TotpDisplaySnapshot;
+	let countdownWrites = 0;
+	let badgeProgressWrites = 0;
+	const countdownEl = refs.countdownEl as unknown as FakeElement & {
+		setText: (text: string) => void;
+	};
+	const countdownBadgeEl = refs.countdownBadgeEl as unknown as FakeElement & {
+		setCssProps: (props: Record<string, string>) => void;
+	};
+	const originalSetText = countdownEl.setText.bind(countdownEl);
+	const originalSetCssProps = countdownBadgeEl.setCssProps.bind(countdownBadgeEl);
+	countdownEl.setText = (text: string) => {
+		countdownWrites += 1;
+		originalSetText(text);
+	};
+	countdownBadgeEl.setCssProps = (props: Record<string, string>) => {
+		badgeProgressWrites += 1;
+		originalSetCssProps(props);
+	};
+
+	const controller = new TotpCodeRefreshController({
+		createDisplaySnapshot: async () => snapshot,
+		shouldReduceMotion: () => true,
+	});
+
+	controller.registerRow(entry, refs);
+	await controller.refreshVisibleCodes(createPluginStub(), [entry]);
+	await controller.refreshVisibleCodes(createPluginStub(), [entry]);
+
+	assert.equal(countdownWrites, 1);
+	assert.equal(badgeProgressWrites, 1);
+});
+
 test("TotpCodeRefreshController clears the previous transition before starting a new one", async () => {
 	const entry = createEntry("entry-1");
 	const { refs } = createRowRefs();

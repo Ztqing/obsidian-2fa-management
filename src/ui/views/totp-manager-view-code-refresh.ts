@@ -93,6 +93,64 @@ export function renderStaticCode(containerEl: HTMLElement, value: string): void 
 	}
 }
 
+function setAttributeIfChanged(
+	element: HTMLElement,
+	name: string,
+	value: string,
+): void {
+	if (element.getAttribute(name) === value) {
+		return;
+	}
+
+	element.setAttribute(name, value);
+}
+
+function setCssPropIfChanged(
+	element: HTMLElement,
+	name: string,
+	value: string,
+): void {
+	const fakeElement = element as HTMLElement & {
+		cssProps?: Record<string, string>;
+	};
+	if (fakeElement.cssProps?.[name] === value) {
+		return;
+	}
+
+	element.setCssProps({
+		[name]: value,
+	});
+}
+
+function setTextIfChanged(element: HTMLElement, value: string): void {
+	const fakeElement = element as HTMLElement & {
+		setText?: (text: string) => void;
+		textContent?: string;
+	};
+	if (fakeElement.textContent === value) {
+		return;
+	}
+
+	if (typeof fakeElement.setText === "function") {
+		fakeElement.setText(value);
+		return;
+	}
+
+	element.textContent = value;
+}
+
+function toggleClassIfChanged(
+	element: HTMLElement,
+	className: string,
+	force: boolean,
+): void {
+	if (elementHasClass(element, className) === force) {
+		return;
+	}
+
+	element.toggleClass(className, force);
+}
+
 interface TotpCodeRefreshTimerApi {
 	clearTimeout: (timerId: number) => void;
 	setTimeout: (handler: () => void, timeoutMs: number) => number;
@@ -161,6 +219,40 @@ function createWindowVisibilityObserver(
 	});
 }
 
+function areSnapshotsEquivalent(
+	left: TotpDisplaySnapshot,
+	right: TotpDisplaySnapshot,
+): boolean {
+	return (
+		left.currentCode === right.currentCode &&
+		left.hasNextCode === right.hasNextCode &&
+		left.isRefreshingSoon === right.isRefreshingSoon &&
+		left.nextCode === right.nextCode &&
+		left.progressPercent === right.progressPercent &&
+		left.secondsRemaining === right.secondsRemaining
+	);
+}
+
+function areCachedDisplaysEquivalent(
+	left: CachedEntryDisplay | undefined,
+	right: CachedEntryDisplay,
+): boolean {
+	if (!left || left.kind !== right.kind) {
+		return false;
+	}
+
+	if (left.kind === "snapshot" && right.kind === "snapshot") {
+		return areSnapshotsEquivalent(left.value, right.value);
+	}
+
+	return (
+		left.kind === "error" &&
+		right.kind === "error" &&
+		left.label === right.label &&
+		left.message === right.message
+	);
+}
+
 export class TotpCodeRefreshController {
 	private readonly rowRefs = new Map<string, EntryRowRefs>();
 	private readonly cachedDisplays = new Map<string, CachedEntryDisplay>();
@@ -213,6 +305,19 @@ export class TotpCodeRefreshController {
 		}
 		this.applyCachedDisplay(entry.id, refs);
 		this.applyDragDecorations(entry.id, refs, this.currentDragState);
+	}
+
+	unregisterRow(entryId: string): void {
+		const refs = this.rowRefs.get(entryId);
+		if (!refs) {
+			return;
+		}
+
+		this.clearCodeTransition(refs);
+		this.visibilityObserver?.unobserve(refs.cardEl);
+		this.rowRefs.delete(entryId);
+		this.observedCardEntryIds.delete(refs.cardEl);
+		this.viewportEntryIds.delete(entryId);
 	}
 
 	resetRows(): void {
@@ -357,10 +462,20 @@ export class TotpCodeRefreshController {
 			}
 
 			if (result.snapshot) {
-				this.cachedDisplays.set(result.entryId, {
+				const nextDisplay: CachedEntryDisplay = {
 					kind: "snapshot",
 					value: result.snapshot,
-				});
+				};
+				if (
+					areCachedDisplaysEquivalent(
+						this.cachedDisplays.get(result.entryId),
+						nextDisplay,
+					)
+				) {
+					continue;
+				}
+
+				this.cachedDisplays.set(result.entryId, nextDisplay);
 				this.applySnapshot(refs, result.snapshot, {
 					countdownLabel: plugin.t("view.entry.countdown", {
 						seconds: result.snapshot.secondsRemaining,
@@ -370,11 +485,21 @@ export class TotpCodeRefreshController {
 			}
 
 			const errorMessage = result.error ?? plugin.t("view.entry.refreshFallback");
-			this.cachedDisplays.set(result.entryId, {
+			const nextDisplay: CachedEntryDisplay = {
 				kind: "error",
 				label: plugin.t("view.entry.error"),
 				message: errorMessage,
-			});
+			};
+			if (
+				areCachedDisplaysEquivalent(
+					this.cachedDisplays.get(result.entryId),
+					nextDisplay,
+				)
+			) {
+				continue;
+			}
+
+			this.cachedDisplays.set(result.entryId, nextDisplay);
 			this.applyErrorState(refs, {
 				errorLabel: plugin.t("view.entry.error"),
 				errorMessage,
@@ -444,14 +569,24 @@ export class TotpCodeRefreshController {
 			options.disableAnimation ? "none" : transitionPlan.currentAnimationMode,
 			transitionPlan,
 		);
-		refs.codeEl.removeClass("is-error");
-		refs.countdownEl.setText(String(snapshot.secondsRemaining));
-		refs.countdownBadgeEl.setAttribute("aria-label", options.countdownLabel);
-		refs.countdownBadgeEl.setCssProps({
-			"--countdown-progress": `${snapshot.progressPercent.toFixed(2)}%`,
-		});
-		refs.countdownBadgeEl.removeClass("is-error");
-		refs.countdownBadgeEl.toggleClass("is-warning", snapshot.isRefreshingSoon);
+		toggleClassIfChanged(refs.codeEl, "is-error", false);
+		setTextIfChanged(refs.countdownEl, String(snapshot.secondsRemaining));
+		setAttributeIfChanged(
+			refs.countdownBadgeEl,
+			"aria-label",
+			options.countdownLabel,
+		);
+		setCssPropIfChanged(
+			refs.countdownBadgeEl,
+			"--countdown-progress",
+			`${snapshot.progressPercent.toFixed(2)}%`,
+		);
+		toggleClassIfChanged(refs.countdownBadgeEl, "is-error", false);
+		toggleClassIfChanged(
+			refs.countdownBadgeEl,
+			"is-warning",
+			snapshot.isRefreshingSoon,
+		);
 
 		if (refs.nextCodeEl) {
 			renderStaticCode(
@@ -472,14 +607,16 @@ export class TotpCodeRefreshController {
 		},
 	): void {
 		this.setCurrentCodeText(refs, options.errorLabel);
-		refs.codeEl.addClass("is-error");
-		refs.countdownEl.setText("!");
-		refs.countdownBadgeEl.setCssProps({
-			"--countdown-progress": "0%",
-		});
-		refs.countdownBadgeEl.removeClass("is-warning");
-		refs.countdownBadgeEl.addClass("is-error");
-		refs.countdownBadgeEl.setAttribute("aria-label", options.errorMessage);
+		toggleClassIfChanged(refs.codeEl, "is-error", true);
+		setTextIfChanged(refs.countdownEl, "!");
+		setCssPropIfChanged(refs.countdownBadgeEl, "--countdown-progress", "0%");
+		toggleClassIfChanged(refs.countdownBadgeEl, "is-warning", false);
+		toggleClassIfChanged(refs.countdownBadgeEl, "is-error", true);
+		setAttributeIfChanged(
+			refs.countdownBadgeEl,
+			"aria-label",
+			options.errorMessage,
+		);
 
 		if (refs.nextCodeEl) {
 			renderStaticCode(refs.nextCodeEl, CODE_PLACEHOLDER);
@@ -489,13 +626,11 @@ export class TotpCodeRefreshController {
 
 	private applyPlaceholderState(refs: EntryRowRefs): void {
 		this.setCurrentCodeText(refs, CODE_PLACEHOLDER);
-		refs.codeEl.removeClass("is-error");
-		refs.countdownEl.setText("...");
-		refs.countdownBadgeEl.removeClass("is-error");
-		refs.countdownBadgeEl.removeClass("is-warning");
-		refs.countdownBadgeEl.setCssProps({
-			"--countdown-progress": "0%",
-		});
+		toggleClassIfChanged(refs.codeEl, "is-error", false);
+		setTextIfChanged(refs.countdownEl, "...");
+		toggleClassIfChanged(refs.countdownBadgeEl, "is-error", false);
+		toggleClassIfChanged(refs.countdownBadgeEl, "is-warning", false);
+		setCssPropIfChanged(refs.countdownBadgeEl, "--countdown-progress", "0%");
 
 		if (refs.nextCodeEl) {
 			renderStaticCode(refs.nextCodeEl, CODE_PLACEHOLDER);
@@ -560,6 +695,14 @@ export class TotpCodeRefreshController {
 	}
 
 	private setCurrentCodeText(refs: EntryRowRefs, value: string): void {
+		if (
+			refs.activeTransitionEl === null &&
+			refs.codeEl.textContent === value &&
+			refs.previousCurrentCode === (value === CODE_PLACEHOLDER ? null : value)
+		) {
+			return;
+		}
+
 		refs.activeTransitionEl = null;
 		refs.previousCurrentCode = value === CODE_PLACEHOLDER ? null : value;
 		renderStaticCode(refs.codeEl, value);

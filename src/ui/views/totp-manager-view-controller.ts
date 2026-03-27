@@ -1,4 +1,3 @@
-import { Menu, Notice } from "obsidian";
 import { createTotpSnapshot } from "../../totp/totp";
 import type TwoFactorManagementPlugin from "../../plugin";
 import type {
@@ -11,125 +10,18 @@ import {
 	getCardKeyboardAction,
 	shouldCopyCodeFromCardClick,
 } from "./card-interactions";
+import { TotpManagerViewCopyFeedbackController } from "./totp-manager-view-copy-feedback";
+import { TotpManagerViewDragController } from "./totp-manager-view-drag-controller";
+import {
+	MenuTarget,
+	TotpManagerViewMenuAdapter,
+	type TotpManagerViewMenuLike,
+	TotpManagerViewMenuController,
+} from "./totp-manager-view-menus";
 import type { TotpCodeRefreshController } from "./totp-manager-view-code-refresh";
 import type { TotpManagerViewRendererActions } from "./totp-manager-view-renderer";
-import {
-	getEntryDropPlacement,
-	TotpManagerViewState,
-} from "./totp-manager-view-state";
-import { reorderVisibleEntries } from "./entry-order";
+import { TotpManagerViewState } from "./totp-manager-view-state";
 import type { TotpManagerViewRenderMode } from "./totp-manager-view-renderer";
-
-interface TotpManagerViewMenuItemLike {
-	onClick(callback: () => void): this;
-	setDanger(isDanger?: boolean): this;
-	setIcon(icon: string): this;
-	setTitle(title: string): this;
-}
-
-interface TotpManagerViewMenuLike {
-	addItem(callback: (item: TotpManagerViewMenuItemLike) => void): this;
-	addSeparator(): this;
-	showAtMouseEvent(event: MouseEvent): void;
-	showAtPosition(position: {
-		left?: boolean;
-		width?: number;
-		x: number;
-		y: number;
-	}): void;
-}
-
-interface ObsidianMenuItemLike {
-	onClick(callback: (event: MouseEvent | KeyboardEvent) => void): this;
-	setIcon(icon: string | null): this;
-	setTitle(title: string | DocumentFragment): this;
-}
-
-function createDangerMenuTitle(title: string): string | DocumentFragment {
-	if (
-		typeof document === "undefined" ||
-		typeof document.createDocumentFragment !== "function"
-	) {
-		return title;
-	}
-
-	const fragment = document.createDocumentFragment();
-	const label = document.createElement("span");
-	label.className = "twofa-menu-item-danger";
-	label.textContent = title;
-	fragment.append(label);
-	return fragment;
-}
-
-class TotpManagerViewMenuItemAdapter implements TotpManagerViewMenuItemLike {
-	private title = "";
-	private isDanger = false;
-
-	constructor(private readonly item: ObsidianMenuItemLike) {}
-
-	onClick(callback: () => void): this {
-		this.item.onClick(() => {
-			callback();
-		});
-		return this;
-	}
-
-	setDanger(isDanger = true): this {
-		this.isDanger = isDanger;
-		this.applyTitle();
-		return this;
-	}
-
-	setIcon(icon: string): this {
-		this.item.setIcon(icon);
-		return this;
-	}
-
-	setTitle(title: string): this {
-		this.title = title;
-		this.applyTitle();
-		return this;
-	}
-
-	private applyTitle(): void {
-		if (this.title.length === 0) {
-			return;
-		}
-
-		this.item.setTitle(
-			this.isDanger ? createDangerMenuTitle(this.title) : this.title,
-		);
-	}
-}
-
-class TotpManagerViewMenuAdapter implements TotpManagerViewMenuLike {
-	private readonly menu = new Menu().setUseNativeMenu(false);
-
-	addItem(callback: (item: TotpManagerViewMenuItemLike) => void): this {
-		this.menu.addItem((item) => {
-			callback(new TotpManagerViewMenuItemAdapter(item));
-		});
-		return this;
-	}
-
-	addSeparator(): this {
-		this.menu.addSeparator();
-		return this;
-	}
-
-	showAtMouseEvent(event: MouseEvent): void {
-		this.menu.showAtMouseEvent(event);
-	}
-
-	showAtPosition(position: {
-		left?: boolean;
-		width?: number;
-		x: number;
-		y: number;
-	}): void {
-		this.menu.showAtPosition(position);
-	}
-}
 
 type TranslationKey = Parameters<TwoFactorManagementPlugin["t"]>[0];
 
@@ -151,37 +43,6 @@ export interface TotpManagerViewControllerEnvironment {
 	reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void>;
 	showNotice(message: string): void;
 	t(key: TranslationKey, variables?: TranslationVariables): string;
-}
-
-type MenuTarget = MouseEvent | Pick<HTMLElement, "getBoundingClientRect">;
-
-function isMouseEventTarget(target: MenuTarget): target is MouseEvent {
-	return (
-		typeof (target as MouseEvent).clientX === "number" &&
-		typeof (target as MouseEvent).clientY === "number"
-	);
-}
-
-function getMenuPositionFromTarget(target: MenuTarget): {
-	left?: boolean;
-	width?: number;
-	x: number;
-	y: number;
-} {
-	if (isMouseEventTarget(target)) {
-		return {
-			x: target.clientX,
-			y: target.clientY,
-		};
-	}
-
-	const rect = target.getBoundingClientRect();
-	return {
-		x: rect.right - 12,
-		y: rect.top + Math.min(rect.height / 2, 48),
-		width: rect.width,
-		left: true,
-	};
 }
 
 export function createTotpManagerViewControllerEnvironment(
@@ -209,17 +70,16 @@ export function createTotpManagerViewControllerEnvironment(
 		reorderEntriesByIds: async (nextOrderedIds) =>
 			plugin.reorderEntriesByIds(nextOrderedIds),
 		showNotice: (message) => {
-			new Notice(message);
+			plugin.showNotice(message);
 		},
 		t: (key, variables = {}) => plugin.t(key, variables),
 	};
 }
 
 export class TotpManagerViewController {
-	private readonly copyFeedbackTimers = new WeakMap<
-		HTMLElement,
-		ReturnType<typeof setTimeout>
-	>();
+	private readonly copyFeedback = new TotpManagerViewCopyFeedbackController();
+	private readonly dragController: TotpManagerViewDragController;
+	private readonly menuController: TotpManagerViewMenuController;
 
 	constructor(
 		private readonly environment: TotpManagerViewControllerEnvironment,
@@ -229,7 +89,21 @@ export class TotpManagerViewController {
 			"syncDragState"
 		>,
 		private readonly requestRefresh: (mode?: TotpManagerViewRenderMode) => Promise<void>,
-	) {}
+	) {
+		this.dragController = new TotpManagerViewDragController(
+			{
+				getEntries: () => this.environment.getEntries(),
+				reorderEntriesByIds: async (nextOrderedIds) =>
+					this.environment.reorderEntriesByIds(nextOrderedIds),
+			},
+			this.state,
+			this.codeRefresh,
+		);
+		this.menuController = new TotpManagerViewMenuController({
+			createMenu: () => this.environment.createMenu(),
+			t: (key) => this.environment.t(key),
+		});
+	}
 
 	createRendererActions(): TotpManagerViewRendererActions {
 		return {
@@ -340,48 +214,22 @@ export class TotpManagerViewController {
 	}
 
 	openToolbarMenu(target: MenuTarget): void {
-		const menu = this.environment.createMenu();
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.bulkImport"))
-				.setIcon("upload")
-				.onClick(() => {
-					void this.handleBulkImport();
-				});
+		this.menuController.openToolbarMenu(target, {
+			hasVisibleEntries: this.state.getVisibleEntries().length > 0,
+			onBulkImport: () => {
+				void this.handleBulkImport();
+			},
+			onEnterSelectionMode: () => {
+				void this.enterSelectionMode();
+			},
+			onLockVault: () => {
+				this.lockVault();
+			},
 		});
-
-		if (this.state.getVisibleEntries().length > 0) {
-			menu.addItem((item) => {
-				item
-					.setTitle(this.environment.t("common.multiSelect"))
-					.setIcon("check-square")
-					.onClick(() => {
-						void this.enterSelectionMode();
-					});
-			});
-		}
-
-		menu.addSeparator();
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.lock"))
-				.setDanger()
-				.setIcon("lock")
-				.onClick(() => {
-					this.lockVault();
-				});
-		});
-		this.showMenuAtTarget(menu, target);
 	}
 
 	handleCardPointerDown(entry: TotpEntryRecord, event: PointerEvent): void {
-		this.state.handlePointerDown(entry.id, event, () => {
-			if (!this.state.beginDrag(entry.id, event.pointerId)) {
-				return;
-			}
-
-			this.codeRefresh.syncDragState(this.state.getDragState());
-		});
+		this.dragController.handleCardPointerDown(entry, event);
 	}
 
 	async handleCardPointerEnd(
@@ -389,37 +237,15 @@ export class TotpManagerViewController {
 		card: HTMLElement,
 		event: PointerEvent,
 	): Promise<void> {
-		if (!this.state.isDraggingPointer(event.pointerId)) {
-			this.state.clearLongPressState(event.pointerId);
-			return;
-		}
-
-		if (!this.state.getDragState()?.movedIds.includes(entry.id)) {
-			const placement = getEntryDropPlacement(card.getBoundingClientRect(), event.clientY);
-			if (this.state.updateDragTarget(entry.id, placement)) {
-				this.codeRefresh.syncDragState(this.state.getDragState());
-			}
-		}
-
-		await this.commitPointerDrag(event.pointerId);
+		await this.dragController.handleCardPointerEnd(entry, card, event);
 	}
 
 	handleCardPointerLeave(event: PointerEvent): void {
-		if (this.state.getDragState()) {
-			return;
-		}
-
-		this.state.clearLongPressState(event.pointerId);
+		this.dragController.handleCardPointerLeave(event);
 	}
 
 	handleCardPointerCancel(event: PointerEvent): void {
-		this.state.clearLongPressState(event.pointerId);
-		if (!this.state.isDraggingPointer(event.pointerId)) {
-			return;
-		}
-
-		this.state.clearDragState(event.pointerId);
-		this.codeRefresh.syncDragState(null);
+		this.dragController.handleCardPointerCancel(event);
 	}
 
 	handleCardPointerMove(
@@ -427,25 +253,7 @@ export class TotpManagerViewController {
 		card: HTMLElement,
 		event: PointerEvent,
 	): void {
-		const thresholdExceededEntryId = this.state.handlePointerMove(event);
-		if (
-			this.state.isSelectionMode() &&
-			!this.state.isDraggingPointer(event.pointerId) &&
-			thresholdExceededEntryId
-		) {
-			if (this.state.beginDrag(thresholdExceededEntryId, event.pointerId)) {
-				this.codeRefresh.syncDragState(this.state.getDragState());
-			}
-		}
-
-		if (!this.state.isDraggingPointer(event.pointerId)) {
-			return;
-		}
-
-		const placement = getEntryDropPlacement(card.getBoundingClientRect(), event.clientY);
-		if (this.state.updateDragTarget(entry.id, placement)) {
-			this.codeRefresh.syncDragState(this.state.getDragState());
-		}
+		this.dragController.handleCardPointerMove(entry, card, event);
 	}
 
 	async handleCardClick(
@@ -552,7 +360,7 @@ export class TotpManagerViewController {
 		try {
 			const snapshot = await this.environment.createTotpSnapshot(entry);
 			await this.environment.copyTextToClipboard(snapshot.code);
-			this.flashCopyFeedback(card);
+			this.copyFeedback.flashCardCodeRow(card);
 			this.environment.showNotice(
 				this.environment.t("notice.codeCopied", {
 					accountName: entry.accountName,
@@ -563,129 +371,29 @@ export class TotpManagerViewController {
 		}
 	}
 
-	private flashCopyFeedback(card?: HTMLElement): void {
-		const codeRow = this.findCardCodeRow(card);
-		if (!codeRow || typeof globalThis.setTimeout !== "function") {
-			return;
-		}
-
-		const previousTimerId = this.copyFeedbackTimers.get(codeRow);
-		if (previousTimerId && typeof globalThis.clearTimeout === "function") {
-			globalThis.clearTimeout(previousTimerId);
-		}
-
-		codeRow.classList.add("is-copy-success");
-		const timerId = globalThis.setTimeout(() => {
-			codeRow.classList.remove("is-copy-success");
-			this.copyFeedbackTimers.delete(codeRow);
-		}, 520);
-		this.copyFeedbackTimers.set(codeRow, timerId);
-	}
-
-	private findCardCodeRow(card?: HTMLElement): HTMLElement | null {
-		if (!card) {
-			return null;
-		}
-
-		if (typeof card.findAll === "function") {
-			return card.findAll(".twofa-entry-card__code-row")[0] ?? null;
-		}
-
-		return null;
-	}
-
 	async handleGlobalPointerEnd(event: PointerEvent): Promise<void> {
-		if (!this.state.isDraggingPointer(event.pointerId)) {
-			this.state.clearLongPressState(event.pointerId);
-			return;
-		}
-
-		await this.commitPointerDrag(event.pointerId);
+		await this.dragController.handleGlobalPointerEnd(event);
 	}
 
 	handleGlobalPointerCancel(event: PointerEvent): void {
-		this.state.clearLongPressState(event.pointerId);
-		if (!this.state.isDraggingPointer(event.pointerId)) {
-			return;
-		}
-
-		this.state.clearDragState(event.pointerId);
-		this.codeRefresh.syncDragState(null);
-	}
-
-	private async commitPointerDrag(pointerId: number): Promise<void> {
-		const dragState = this.state.getDragState();
-
-		this.state.clearDragState(pointerId);
-		this.codeRefresh.syncDragState(null);
-
-		if (!dragState) {
-			return;
-		}
-
-		if (dragState.overEntryId === null) {
-			return;
-		}
-
-		const currentEntries = this.environment.getEntries();
-		const nextOrderedIds = reorderVisibleEntries(
-			currentEntries,
-			this.state.getVisibleEntries().map((visibleEntry) => visibleEntry.id),
-			dragState.movedIds,
-			dragState.overEntryId,
-			dragState.placement,
-		);
-		const didChange = nextOrderedIds.some(
-			(entryId, index) => entryId !== currentEntries[index]?.id,
-		);
-
-		if (!didChange) {
-			return;
-		}
-
-		await this.environment.reorderEntriesByIds(nextOrderedIds);
+		this.dragController.handleGlobalPointerCancel(event);
 	}
 
 	private showEntryContextMenu(entry: TotpEntryRecord, target: MenuTarget): void {
-		const menu = this.environment.createMenu();
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.multiSelect"))
-				.setIcon("check-square")
-				.onClick(() => {
-					void this.enterSelectionMode(entry.id);
-				});
+		this.menuController.openEntryContextMenu(entry, target, {
+			onDeleteEntry: (selectedEntry) => {
+				void this.environment.confirmAndDeleteEntry(selectedEntry);
+			},
+			onEditEntry: (selectedEntry) => {
+				void this.environment.promptToEditEntry(selectedEntry);
+			},
+			onEnterSelectionMode: (entryId) => {
+				void this.enterSelectionMode(entryId);
+			},
 		});
-		menu.addSeparator();
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.edit"))
-				.setIcon("pencil")
-				.onClick(() => {
-					void this.environment.promptToEditEntry(entry);
-				});
-		});
-		menu.addItem((item) => {
-			item
-				.setTitle(this.environment.t("common.delete"))
-				.setDanger()
-				.setIcon("trash-2")
-				.onClick(() => {
-					void this.environment.confirmAndDeleteEntry(entry);
-				});
-		});
-		this.showMenuAtTarget(menu, target);
 	}
 
-	private showMenuAtTarget(
-		menu: TotpManagerViewMenuLike,
-		target: MenuTarget,
-	): void {
-		if (isMouseEventTarget(target)) {
-			menu.showAtMouseEvent(target);
-			return;
-		}
-
-		menu.showAtPosition(getMenuPositionFromTarget(target));
+	destroy(): void {
+		this.copyFeedback.destroy();
 	}
 }
