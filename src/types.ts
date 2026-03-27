@@ -1,4 +1,18 @@
 export type PreferredSide = "left" | "right";
+export type LockTimeoutMode = "custom" | "on-restart" | "never";
+export type PersistedUnlockAvailability =
+	| "available"
+	| "insecure"
+	| "unavailable";
+export type PersistedUnlockCapabilitySource =
+	| "safe-storage"
+	| "compatibility-fallback"
+	| "none";
+
+export interface PersistedUnlockCapability {
+	availability: PersistedUnlockAvailability;
+	source: PersistedUnlockCapabilitySource;
+}
 
 export type TotpAlgorithm = "SHA-1" | "SHA-256" | "SHA-512";
 export type UiLocale = "en" | "zh-CN" | "zh-TW";
@@ -12,13 +26,39 @@ export interface EncryptedVaultData {
 	cipherTextB64: string;
 }
 
+export interface LegacyPersistedUnlockData {
+	version: 1;
+	protectedPasswordB64: string;
+}
+
+export interface SafeStoragePersistedUnlockData {
+	kind: "safe-storage";
+	version: 2;
+	protectedPasswordB64: string;
+}
+
+export interface CompatibilityFallbackPersistedUnlockData {
+	kind: "compatibility-fallback";
+	version: 2;
+	plainPassword: string;
+}
+
+export type PersistedUnlockData =
+	| LegacyPersistedUnlockData
+	| SafeStoragePersistedUnlockData
+	| CompatibilityFallbackPersistedUnlockData;
+
 export interface PluginSettings {
+	allowInsecurePersistedUnlockFallback: boolean;
+	lockTimeoutMinutes: number;
+	lockTimeoutMode: LockTimeoutMode;
 	preferredSide: PreferredSide;
 	showUpcomingCodes: boolean;
 }
 
 export interface PluginData {
 	schemaVersion: 1;
+	persistedUnlock: PersistedUnlockData | null;
 	vaultRevision: number;
 	vault: EncryptedVaultData | null;
 	settings: PluginSettings;

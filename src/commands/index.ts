@@ -26,6 +26,7 @@ export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 		id: "open-2fa-view",
 		name: plugin.t("command.openView"),
 		callback: () => {
+			plugin.recordSessionActivity();
 			void executeGuardedPluginCommand(plugin, () => plugin.open2FAView());
 		},
 	});
@@ -34,6 +35,7 @@ export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 		id: "unlock-2fa-vault",
 		name: plugin.t("command.unlockVault"),
 		callback: () => {
+			plugin.recordSessionActivity();
 			void executeGuardedPluginCommand(plugin, () => plugin.promptToUnlockVault());
 		},
 	});
@@ -42,6 +44,7 @@ export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 		id: "lock-2fa-vault",
 		name: plugin.t("command.lockVault"),
 		callback: () => {
+			plugin.recordSessionActivity();
 			plugin.lockVault(true);
 		},
 	});
@@ -50,6 +53,7 @@ export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 		id: "add-totp-entry",
 		name: plugin.t("command.addEntry"),
 		callback: () => {
+			plugin.recordSessionActivity();
 			void executeGuardedPluginCommand(plugin, () => plugin.handleAddEntryCommand());
 		},
 	});
@@ -58,6 +62,7 @@ export function registerPluginCommands(plugin: CommandRegistrationHost): void {
 		id: "bulk-import-otpauth-links",
 		name: plugin.t("command.bulkImportOtpauthLinks"),
 		callback: () => {
+			plugin.recordSessionActivity();
 			void executeGuardedPluginCommand(plugin, () =>
 				plugin.handleBulkImportOtpauthLinksCommand(),
 			);

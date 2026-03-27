@@ -1,10 +1,14 @@
 import { Notice, Plugin, getLanguage, type WorkspaceLeaf } from "obsidian";
-import type {
-	CommandHandlers,
-	SettingsActions,
-	ViewInvalidationMode,
-} from "./application/contracts";
+import type { ViewInvalidationMode } from "./application/contracts";
+import {
+	confirmEnableInsecurePersistedUnlockFallback,
+	createCommandHandlers,
+	createPluginActionEnvironment,
+	createSettingsController,
+} from "./plugin/internal/controllers";
+import { refreshManagedViews } from "./plugin/internal/view-refresh";
 import { PreferencesService } from "./application/preferences-service";
+import { SessionLockController } from "./application/session-lock-controller";
 import { registerPluginCommands } from "./commands/index";
 import { OBSIDIAN_2FA_VIEW } from "./constants";
 import { USER_ERROR_TRANSLATION_KEYS, isTwoFaUserError } from "./errors";
@@ -12,11 +16,12 @@ import { resolveUiLocale } from "./i18n/language";
 import { type TranslationKey, translateUiString } from "./i18n/translations";
 import {
 	TwoFactorPluginActions,
-	type TwoFactorPluginActionEnvironment,
 } from "./plugin-actions";
 import { TwoFactorSettingTab } from "./settings";
 import { clearSharedPreparedTotpEntryCache } from "./totp/totp";
 import type {
+	LockTimeoutMode,
+	PersistedUnlockCapability,
 	PreferredSide,
 	TotpEntryRecord,
 	TranslationVariables,
@@ -24,12 +29,7 @@ import type {
 	VaultLoadIssue,
 } from "./types";
 import { createRandomId } from "./utils/id";
-import { openBulkOtpauthImportModal } from "./ui/modals/bulk-otpauth-import-modal";
-import { confirmAction } from "./ui/modals/confirm-modal";
-import { promptForMasterPassword } from "./ui/modals/master-password-modal";
-import { openTotpEntryModal } from "./ui/modals/totp-entry-modal";
 import { TotpManagerView } from "./ui/views/totp-manager-view";
-import type { TotpManagerViewRenderMode } from "./ui/views/totp-manager-view-renderer";
 import { TwoFactorVaultService } from "./vault/service";
 
 export default class TwoFactorManagementPlugin extends Plugin {
@@ -50,23 +50,44 @@ export default class TwoFactorManagementPlugin extends Plugin {
 	);
 
 	private readonly actions = new TwoFactorPluginActions(
-		this.createPluginActionEnvironment(),
+		createPluginActionEnvironment(this, {
+			refreshAllViews: async (mode) => this.refreshAllViews(mode),
+			service: this.vaultService,
+		}),
 	);
+
+	private readonly sessionLockController = new SessionLockController({
+		getLockTimeoutMinutes: () => this.vaultService.getLockTimeoutMinutes(),
+		getLockTimeoutMode: () => this.vaultService.getLockTimeoutMode(),
+		isUnlocked: () => this.vaultService.isUnlocked(),
+		lockVaultDueToTimeout: () => {
+			this.lockVaultDueToTimeout();
+		},
+	});
 
 	async onload(): Promise<void> {
 		await this.vaultService.load();
+		this.sessionLockController.syncState();
 		this.registerView(OBSIDIAN_2FA_VIEW, (leaf) => new TotpManagerView(leaf, this));
 		this.addSettingTab(
-			new TwoFactorSettingTab(this.app, this, this.createSettingsController()),
+			new TwoFactorSettingTab(
+				this.app,
+				this,
+				createSettingsController(
+					this,
+					() => this.confirmEnableInsecurePersistedUnlockFallback(),
+				),
+			),
 		);
 		registerPluginCommands({
-			...this.createCommandHandlers(),
+			...createCommandHandlers(this),
 			addCommand: this.addCommand.bind(this),
 		});
 	}
 
 	onunload(): void {
-		this.vaultService.lockVault();
+		this.sessionLockController.destroy();
+		this.vaultService.clearSession();
 		clearSharedPreparedTotpEntryCache();
 	}
 
@@ -118,8 +139,41 @@ export default class TwoFactorManagementPlugin extends Plugin {
 		return this.preferencesService.getPreferredSide();
 	}
 
+	getLockTimeoutMode(): LockTimeoutMode {
+		return this.vaultService.getLockTimeoutMode();
+	}
+
+	getLockTimeoutMinutes(): number {
+		return this.vaultService.getLockTimeoutMinutes();
+	}
+
+	getPersistedUnlockCapability(): PersistedUnlockCapability {
+		return this.vaultService.getPersistedUnlockCapability();
+	}
+
+	isInsecurePersistedUnlockFallbackEnabled(): boolean {
+		return this.vaultService.isInsecurePersistedUnlockFallbackEnabled();
+	}
+
 	async setPreferredSide(side: PreferredSide): Promise<void> {
 		await this.preferencesService.setPreferredSide(side);
+	}
+
+	async setLockTimeoutMode(mode: LockTimeoutMode): Promise<void> {
+		await this.vaultService.setLockTimeoutMode(mode);
+		this.sessionLockController.syncState();
+	}
+
+	async setLockTimeoutMinutes(minutes: number): Promise<void> {
+		await this.vaultService.setLockTimeoutMinutes(minutes);
+		this.sessionLockController.syncState();
+	}
+
+	async setInsecurePersistedUnlockFallbackEnabled(
+		enabled: boolean,
+	): Promise<void> {
+		await this.vaultService.setInsecurePersistedUnlockFallbackEnabled(enabled);
+		this.sessionLockController.syncState();
 	}
 
 	shouldShowUpcomingCodes(): boolean {
@@ -149,18 +203,36 @@ export default class TwoFactorManagementPlugin extends Plugin {
 
 	lockVault(showNotice = false): void {
 		this.actions.lockVault(showNotice);
+		this.sessionLockController.syncState();
+	}
+
+	lockVaultDueToTimeout(): void {
+		this.actions.lockVaultDueToTimeout();
+		this.sessionLockController.syncState();
 	}
 
 	async promptToInitializeVault(): Promise<boolean> {
-		return this.actions.promptToInitializeVault();
+		const didInitialize = await this.actions.promptToInitializeVault();
+		if (didInitialize) {
+			this.sessionLockController.syncState();
+		}
+		return didInitialize;
 	}
 
 	async promptToUnlockVault(): Promise<boolean> {
-		return this.actions.promptToUnlockVault();
+		const didUnlock = await this.actions.promptToUnlockVault();
+		if (didUnlock) {
+			this.sessionLockController.syncState();
+		}
+		return didUnlock;
 	}
 
 	async promptToChangeMasterPassword(): Promise<boolean> {
-		return this.actions.promptToChangeMasterPassword();
+		const didChange = await this.actions.promptToChangeMasterPassword();
+		if (didChange) {
+			this.sessionLockController.syncState();
+		}
+		return didChange;
 	}
 
 	async handleAddEntryCommand(): Promise<boolean> {
@@ -184,105 +256,33 @@ export default class TwoFactorManagementPlugin extends Plugin {
 	}
 
 	async confirmAndResetVault(): Promise<boolean> {
-		return this.actions.confirmAndResetVault();
+		const didReset = await this.actions.confirmAndResetVault();
+		if (didReset) {
+			this.sessionLockController.syncState();
+		}
+		return didReset;
 	}
 
 	async reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void> {
 		await this.actions.reorderEntriesByIds(nextOrderedIds);
 	}
 
-	private createPluginActionEnvironment(): TwoFactorPluginActionEnvironment {
-		return {
-			confirmAction: async (options) => confirmAction(this.app, options),
-			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
-			open2FAView: async () => {
-				await this.open2FAView();
-			},
-			openBulkOtpauthImportModal: async (existingEntries, expectedVaultRevision) =>
-				openBulkOtpauthImportModal(this, existingEntries, expectedVaultRevision),
-			openTotpEntryModal: async (initialDraft) => openTotpEntryModal(this, initialDraft),
-			promptForMasterPassword: async (options) => promptForMasterPassword(this, options),
-			refreshAllViews: async (mode) => {
-				await this.refreshAllViews(mode);
-			},
-			service: this.vaultService,
-			showNotice: (message: string) => {
-				this.showNotice(message);
-			},
-			t: (key, variables = {}) => this.t(key, variables),
-		};
+	recordSessionActivity(): void {
+		this.sessionLockController.noteActivity();
 	}
 
-	private createCommandHandlers(): CommandHandlers {
-		return {
-			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
-			handleAddEntryCommand: async () => this.handleAddEntryCommand(),
-			handleBulkImportOtpauthLinksCommand: async () =>
-				this.handleBulkImportOtpauthLinksCommand(),
-			lockVault: (showNotice = false) => {
-				this.lockVault(showNotice);
-			},
-			open2FAView: async () => this.open2FAView(),
-			promptToUnlockVault: async () => this.promptToUnlockVault(),
-			showNotice: (message: string) => {
-				this.showNotice(message);
-			},
-			t: (key, variables = {}) => this.t(key, variables),
-		};
-	}
-
-	private createSettingsController(): SettingsActions {
-		return {
-			confirmAndResetVault: async () => this.confirmAndResetVault(),
-			getErrorMessage: (error: unknown) => this.getErrorMessage(error),
-			getPreferredSide: () => this.getPreferredSide(),
-			getVaultLoadIssue: () => this.getVaultLoadIssue(),
-			hasVaultLoadIssue: () => this.hasVaultLoadIssue(),
-			isUnlocked: () => this.isUnlocked(),
-			isVaultInitialized: () => this.isVaultInitialized(),
-			lockVault: (showNotice = false) => {
-				this.lockVault(showNotice);
-			},
-			open2FAView: async () => this.open2FAView(),
-			promptToChangeMasterPassword: async () => this.promptToChangeMasterPassword(),
-			promptToInitializeVault: async () => this.promptToInitializeVault(),
-			promptToUnlockVault: async () => this.promptToUnlockVault(),
-			setPreferredSide: async (side: PreferredSide) => this.setPreferredSide(side),
-			setShowUpcomingCodes: async (value: boolean) =>
-				this.setShowUpcomingCodes(value),
-			shouldShowUpcomingCodes: () => this.shouldShowUpcomingCodes(),
-			showNotice: (message: string) => {
-				this.showNotice(message);
-			},
-			t: (key: TranslationKey, variables = {}) => this.t(key, variables),
-		};
-	}
-
-	private async refreshAllViews(mode: ViewInvalidationMode = "full"): Promise<void> {
-		const renderMode = this.toViewRenderMode(mode);
-		const leaves = this.app.workspace.getLeavesOfType(OBSIDIAN_2FA_VIEW);
-		await Promise.allSettled(
-			leaves.map(async (leaf) => {
-				if (leaf.view instanceof TotpManagerView) {
-					await leaf.view.refresh(renderMode);
-				}
-			}),
+	private async confirmEnableInsecurePersistedUnlockFallback(): Promise<boolean> {
+		return confirmEnableInsecurePersistedUnlockFallback(
+			this,
 		);
 	}
 
-	private toViewRenderMode(mode: ViewInvalidationMode): TotpManagerViewRenderMode {
-		switch (mode) {
-			case "availability":
-				return "availability";
-			case "entries":
-				return "entries";
-			case "search":
-				return "search";
-			case "selection":
-				return "body";
-			case "full":
-			default:
-				return "full";
-		}
+	private async refreshAllViews(mode: ViewInvalidationMode = "full"): Promise<void> {
+		const leaves = this.app.workspace.getLeavesOfType(OBSIDIAN_2FA_VIEW);
+		await refreshManagedViews(
+			leaves,
+			mode,
+			(view): view is TotpManagerView => view instanceof TotpManagerView,
+		);
 	}
 }

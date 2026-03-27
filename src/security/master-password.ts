@@ -1,4 +1,4 @@
-export const MIN_MASTER_PASSWORD_LENGTH = 12;
+export const MIN_MASTER_PASSWORD_LENGTH = 6;
 
 export type MasterPasswordValidationIssue = "empty" | "mismatch" | "too_short";
 

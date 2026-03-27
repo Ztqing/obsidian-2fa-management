@@ -4,6 +4,7 @@ import type { BulkOtpauthImportSubmission, TotpEntryRecord } from "../../types";
 import type TwoFactorManagementPlugin from "../../plugin";
 import { BulkImportPreviewRenderer } from "./bulk-import-preview-renderer";
 import { BulkOtpauthImportModalState } from "./bulk-otpauth-import-state";
+import { bindModalSessionActivity } from "./session-activity";
 
 export type BulkOtpauthImportModalResult = Omit<
 	BulkOtpauthImportSubmission,
@@ -48,6 +49,9 @@ class BulkOtpauthImportModal extends Modal {
 	}
 
 	onOpen(): void {
+		bindModalSessionActivity(this.modalEl, () => {
+			this.plugin.recordSessionActivity();
+		});
 		this.titleEl.setText(this.plugin.t("modal.bulkImport.title"));
 		this.contentEl.createEl("p", {
 			text: this.plugin.t("modal.bulkImport.intro"),

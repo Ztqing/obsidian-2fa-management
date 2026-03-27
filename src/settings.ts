@@ -1,8 +1,24 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import {
+	App,
+	Notice,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TextComponent,
+} from "obsidian";
 import { runGuardedAction } from "./application/action-runner";
+import {
+	applyLockTimeoutModeSelection,
+	getLockTimeoutDescriptionTranslationKey,
+	getLockTimeoutModeOptionTranslationKeys,
+	getNeverModeWarningTranslationKey,
+} from "./application/lock-timeout-settings";
 import type { SettingsActions } from "./application/contracts";
+import type { LockTimeoutMode, PersistedUnlockCapability } from "./types";
 
 export class TwoFactorSettingTab extends PluginSettingTab {
+	private didBindActivityListeners = false;
+
 	constructor(
 		app: App,
 		plugin: Plugin,
@@ -14,6 +30,7 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		this.bindActivityListeners(containerEl);
 
 		new Setting(containerEl).setName(this.controller.t("settings.heading")).setHeading();
 		containerEl.createEl("p", {
@@ -135,6 +152,8 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 					});
 			});
 
+		this.renderLockTimeoutSettings(containerEl);
+
 		new Setting(containerEl)
 			.setName(this.controller.t("settings.changePassword.name"))
 			.setDesc(this.controller.t("settings.changePassword.description"))
@@ -159,6 +178,210 @@ export class TwoFactorSettingTab extends PluginSettingTab {
 						void this.runGuardedTask(() => this.handleResetVault());
 					});
 			});
+	}
+
+	private bindActivityListeners(containerEl: HTMLElement): void {
+		if (this.didBindActivityListeners) {
+			return;
+		}
+
+		for (const eventName of ["change", "input", "keydown", "pointerdown"] as const) {
+			containerEl.addEventListener(eventName, () => {
+				this.controller.recordSessionActivity();
+			});
+		}
+
+		this.didBindActivityListeners = true;
+	}
+
+	private renderLockTimeoutSettings(containerEl: HTMLElement): void {
+		const currentMode = this.controller.getLockTimeoutMode();
+		const capability = this.controller.getPersistedUnlockCapability();
+
+		new Setting(containerEl)
+			.setName(this.controller.t("settings.lockTimeout.name"))
+			.setDesc(this.getLockTimeoutDescription(currentMode, capability))
+			.addDropdown((dropdown) => {
+				dropdown.addOptions(this.getLockTimeoutModeOptions(capability));
+				dropdown.setValue(currentMode);
+				dropdown.onChange((value) => {
+					const nextMode = this.normalizeLockTimeoutMode(value);
+					void applyLockTimeoutModeSelection(
+						this.controller,
+						currentMode,
+						nextMode,
+					).then((result) => {
+						if (result.warningTranslationKey) {
+							new Notice(this.controller.t(result.warningTranslationKey));
+						}
+
+						this.display();
+					});
+				});
+			});
+
+		if (capability.source !== "safe-storage") {
+			const isCompatibilityFallbackEnabled =
+				this.controller.isInsecurePersistedUnlockFallbackEnabled();
+
+			new Setting(containerEl)
+				.setName(
+					this.controller.t(
+						"settings.lockTimeout.compatibilityFallback.name",
+					),
+				)
+				.setDesc(
+					this.controller.t(
+						isCompatibilityFallbackEnabled
+							? "settings.lockTimeout.compatibilityFallback.enabledDescription"
+							: "settings.lockTimeout.compatibilityFallback.disabledDescription",
+					),
+				)
+				.addToggle((toggle) => {
+					toggle
+						.setValue(isCompatibilityFallbackEnabled)
+						.onChange((value) => {
+							void this.handleCompatibilityFallbackToggle(
+								value,
+								isCompatibilityFallbackEnabled,
+							);
+						});
+				});
+		}
+
+		if (currentMode !== "custom") {
+			return;
+		}
+
+		new Setting(containerEl)
+			.setName(this.controller.t("settings.lockTimeout.customMinutes.name"))
+			.setDesc(
+				this.controller.t("settings.lockTimeout.customMinutes.description"),
+			)
+			.addText((text) => {
+				text.setValue(String(this.controller.getLockTimeoutMinutes()));
+				text.inputEl.inputMode = "numeric";
+				text.inputEl.addEventListener("blur", () => {
+					void this.commitCustomLockTimeout(text);
+				});
+				text.inputEl.addEventListener("keydown", (event) => {
+					if (event.key !== "Enter") {
+						return;
+					}
+
+					event.preventDefault();
+					text.inputEl.blur();
+				});
+			});
+	}
+
+	private getLockTimeoutDescription(
+		mode: LockTimeoutMode,
+		capability: PersistedUnlockCapability,
+	): string {
+		return this.controller.t(
+			getLockTimeoutDescriptionTranslationKey(mode, capability),
+		);
+	}
+
+	private getLockTimeoutModeOptions(
+		capability: PersistedUnlockCapability,
+	): Record<string, string> {
+		const optionKeys = getLockTimeoutModeOptionTranslationKeys(capability);
+		return {
+			custom: this.controller.t(optionKeys.custom),
+			"on-restart": this.controller.t(optionKeys["on-restart"]),
+			never: this.controller.t(optionKeys.never),
+		};
+	}
+
+	private async handleCompatibilityFallbackToggle(
+		nextEnabled: boolean,
+		currentEnabled: boolean,
+	): Promise<void> {
+		if (nextEnabled === currentEnabled) {
+			return;
+		}
+
+		if (nextEnabled) {
+			const confirmed =
+				await this.controller.confirmEnableInsecurePersistedUnlockFallback();
+
+			if (!confirmed) {
+				this.display();
+				return;
+			}
+		}
+
+		const didSucceed = await this.runGuardedTask(
+			() =>
+				this.controller.setInsecurePersistedUnlockFallbackEnabled(nextEnabled),
+			{
+				redisplayOnFailure: true,
+			},
+		);
+
+		if (
+			didSucceed &&
+			nextEnabled &&
+			this.controller.getLockTimeoutMode() === "never"
+		) {
+			const warningTranslationKey = getNeverModeWarningTranslationKey(
+				this.controller.getPersistedUnlockCapability(),
+			);
+
+			if (warningTranslationKey) {
+				new Notice(this.controller.t(warningTranslationKey));
+			}
+		}
+
+		this.display();
+	}
+
+	private normalizeLockTimeoutMode(value: string): LockTimeoutMode {
+		if (value === "custom" || value === "never") {
+			return value;
+		}
+
+		return "on-restart";
+	}
+
+	private parseLockTimeoutMinutes(rawValue: string): number | null {
+		if (!/^\d+$/.test(rawValue.trim())) {
+			return null;
+		}
+
+		const parsed = Number(rawValue);
+		return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+	}
+
+	private async commitCustomLockTimeout(text: TextComponent): Promise<void> {
+		const parsedMinutes = this.parseLockTimeoutMinutes(text.getValue());
+		const currentMinutes = this.controller.getLockTimeoutMinutes();
+
+		if (parsedMinutes === null) {
+			text.setValue(String(currentMinutes));
+			new Notice(this.controller.t("error.lockTimeoutMinutesInvalid"));
+			return;
+		}
+
+		if (parsedMinutes === currentMinutes) {
+			text.setValue(String(parsedMinutes));
+			return;
+		}
+
+		const didSucceed = await this.runGuardedTask(
+			() => this.controller.setLockTimeoutMinutes(parsedMinutes),
+			{
+				redisplayOnFailure: true,
+			},
+		);
+
+		text.setValue(String(this.controller.getLockTimeoutMinutes()));
+
+		if (didSucceed) {
+			this.display();
+		}
 	}
 
 	private async runGuardedTask(

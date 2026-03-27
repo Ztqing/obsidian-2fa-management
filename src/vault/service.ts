@@ -1,21 +1,25 @@
-import {
-	getNextTotpSortOrder,
-	normalizeTotpEntryDraft,
-} from "../data/store";
 import { createUserError } from "../errors";
-import { applyBulkOtpauthImportPreview } from "../import/bulk-otpauth";
 import { decryptVaultEntries } from "../security/crypto";
+import {
+	createPersistedUnlockStorage,
+	type PersistedUnlockStorage,
+} from "../security/persisted-unlock";
 import type {
 	BulkOtpauthImportCommitResult,
 	BulkOtpauthImportSubmission,
+	LockTimeoutMode,
 	PluginData,
+	PersistedUnlockCapability,
 	PreferredSide,
 	TotpEntryDraft,
 	TotpEntryRecord,
 	VaultLoadIssue,
 } from "../types";
 import { EncryptedVaultManager } from "./encrypted-vault-manager";
+import { VaultEntryMutations } from "./entry-mutations";
+import { VaultPersistedUnlockManager } from "./persisted-unlock-manager";
 import { VaultRepository, type VaultRepositoryDependencies } from "./repository";
+import { VaultSettingsManager } from "./settings-manager";
 import { VaultSession } from "./session";
 
 export interface TwoFactorVaultServiceDependencies extends VaultRepositoryDependencies {
@@ -24,12 +28,17 @@ export interface TwoFactorVaultServiceDependencies extends VaultRepositoryDepend
 		encryptedVault: NonNullable<PluginData["vault"]>,
 		password: string,
 	) => Promise<TotpEntryRecord[]>;
+	persistedUnlockStorage?: PersistedUnlockStorage;
 }
 
 export class TwoFactorVaultService {
 	private readonly repository: VaultRepository;
 	private readonly session = new VaultSession();
 	private readonly encryptedVaultManager: EncryptedVaultManager;
+	private readonly persistedUnlockStorage: PersistedUnlockStorage;
+	private readonly settingsManager: VaultSettingsManager;
+	private readonly entryMutations: VaultEntryMutations;
+	private readonly persistedUnlockManager: VaultPersistedUnlockManager;
 	private writeQueue: Promise<void> = Promise.resolve();
 
 	constructor(private readonly dependencies: TwoFactorVaultServiceDependencies) {
@@ -38,12 +47,34 @@ export class TwoFactorVaultService {
 			this.repository,
 			this.session,
 		);
+		this.persistedUnlockStorage =
+			dependencies.persistedUnlockStorage ?? createPersistedUnlockStorage();
+		this.persistedUnlockManager = new VaultPersistedUnlockManager({
+			decryptEntries: dependencies.decryptEntries,
+			persistedUnlockStorage: this.persistedUnlockStorage,
+			repository: this.repository,
+			session: this.session,
+		});
+		this.settingsManager = new VaultSettingsManager({
+			persistedUnlockManager: this.persistedUnlockManager,
+			repository: this.repository,
+			session: this.session,
+		});
+		this.entryMutations = new VaultEntryMutations({
+			assertVaultRevision: (expectedVaultRevision, errorCode) => {
+				this.assertVaultRevision(expectedVaultRevision, errorCode);
+			},
+			createId: () => this.dependencies.createId(),
+			encryptedVaultManager: this.encryptedVaultManager,
+			session: this.session,
+		});
 	}
 
 	async load(): Promise<void> {
 		await this.writeQueue;
 		await this.repository.load();
 		this.session.clear();
+		await this.persistedUnlockManager.restorePersistedUnlockIfAvailable();
 	}
 
 	isVaultInitialized(): boolean {
@@ -74,12 +105,24 @@ export class TwoFactorVaultService {
 		return this.repository.getPreferredSide();
 	}
 
+	getLockTimeoutMode(): LockTimeoutMode {
+		return this.repository.getLockTimeoutMode();
+	}
+
+	getLockTimeoutMinutes(): number {
+		return this.repository.getLockTimeoutMinutes();
+	}
+
+	getPersistedUnlockCapability(): PersistedUnlockCapability {
+		return this.persistedUnlockManager.getCapability();
+	}
+
+	isInsecurePersistedUnlockFallbackEnabled(): boolean {
+		return this.repository.isInsecurePersistedUnlockFallbackEnabled();
+	}
+
 	async setPreferredSide(side: PreferredSide): Promise<void> {
-		await this.enqueueWrite(async () => {
-			await this.repository.persistSettings({
-				preferredSide: side,
-			});
-		});
+		await this.enqueueWrite(async () => this.settingsManager.setPreferredSide(side));
 	}
 
 	shouldShowUpcomingCodes(): boolean {
@@ -87,17 +130,33 @@ export class TwoFactorVaultService {
 	}
 
 	async setShowUpcomingCodes(value: boolean): Promise<void> {
-		await this.enqueueWrite(async () => {
-			await this.repository.persistSettings({
-				showUpcomingCodes: value,
-			});
-		});
+		await this.enqueueWrite(async () => this.settingsManager.setShowUpcomingCodes(value));
+	}
+
+	async setInsecurePersistedUnlockFallbackEnabled(enabled: boolean): Promise<void> {
+		await this.enqueueWrite(async () =>
+			this.persistedUnlockManager.setInsecurePersistedUnlockFallbackEnabled(enabled),
+		);
+	}
+
+	async setLockTimeoutMode(mode: LockTimeoutMode): Promise<void> {
+		await this.enqueueWrite(async () =>
+			this.persistedUnlockManager.setLockTimeoutMode(mode),
+		);
+	}
+
+	async setLockTimeoutMinutes(minutes: number): Promise<void> {
+		await this.enqueueWrite(async () =>
+			this.settingsManager.setLockTimeoutMinutes(minutes),
+		);
 	}
 
 	async initializeVault(password: string): Promise<void> {
 		await this.enqueueWrite(async () => {
 			this.assertVaultCanBeCreated();
-			await this.encryptedVaultManager.initialize(password);
+			await this.encryptedVaultManager.initialize(password, {
+				persistedUnlock: this.persistedUnlockManager.createPersistedUnlockData(password),
+			});
 		});
 	}
 
@@ -114,36 +173,52 @@ export class TwoFactorVaultService {
 		const nextEntries = await (
 			this.dependencies.decryptEntries ?? decryptVaultEntries
 		)(pluginData.vault, password);
-		this.session.completeUnlock(nextEntries, password, unlockAttemptToken);
+		const didUnlock = this.session.completeUnlock(
+			nextEntries,
+			password,
+			unlockAttemptToken,
+		);
+
+		if (!didUnlock || this.repository.getLockTimeoutMode() !== "never") {
+			return;
+		}
+
+		void this.enqueueWrite(async () => {
+			if (this.session.getSessionToken() !== unlockAttemptToken) {
+				return;
+			}
+
+			await this.persistedUnlockManager.refreshPersistedUnlockBestEffort(password);
+		}).catch(() => undefined);
+	}
+
+	clearSession(): void {
+		this.session.clear();
 	}
 
 	lockVault(): void {
-		this.session.clear();
+		this.clearSession();
+
+		if (this.repository.getPersistedUnlock() === null) {
+			return;
+		}
+
+		void this.enqueueWrite(async () => {
+			await this.persistedUnlockManager.clearPersistedUnlockBestEffort();
+		}).catch(() => undefined);
 	}
 
 	async changeMasterPassword(nextPassword: string): Promise<void> {
 		await this.enqueueWrite(async () => {
 			this.assertVaultAvailable();
-			await this.encryptedVaultManager.changeMasterPassword(nextPassword);
+			await this.encryptedVaultManager.changeMasterPassword(nextPassword, {
+				persistedUnlock: this.persistedUnlockManager.createPersistedUnlockData(nextPassword),
+			});
 		});
 	}
 
 	async addEntry(draft: TotpEntryDraft): Promise<void> {
-		await this.enqueueWrite(async () => {
-			const normalizedDraft = normalizeTotpEntryDraft(draft);
-			const currentEntries = this.session.requireUnlockedEntries();
-			const nextEntries = [
-				...currentEntries,
-				{
-					id: this.dependencies.createId(),
-					sortOrder: getNextTotpSortOrder(currentEntries),
-					...normalizedDraft,
-				},
-			];
-			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
-				bumpVaultRevision: true,
-			});
-		});
+		await this.enqueueWrite(async () => this.entryMutations.addEntry(draft));
 	}
 
 	async updateEntry(
@@ -151,122 +226,38 @@ export class TwoFactorVaultService {
 		draft: TotpEntryDraft,
 		expectedVaultRevision: number,
 	): Promise<void> {
-		await this.enqueueWrite(async () => {
-			this.assertVaultRevision(expectedVaultRevision, "entry_changed_during_edit");
-
-			const normalizedDraft = normalizeTotpEntryDraft(draft);
-			const currentEntries = this.session.requireUnlockedEntries();
-			const existingEntry = currentEntries.find((entry) => entry.id === entryId);
-
-			if (!existingEntry) {
-				throw createUserError("entry_not_found");
-			}
-
-			const nextEntries = currentEntries.map((entry) => {
-				if (entry.id !== entryId) {
-					return entry;
-				}
-
-				return {
-					id: entry.id,
-					sortOrder: entry.sortOrder,
-					...normalizedDraft,
-				};
-			});
-
-			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
-				bumpVaultRevision: true,
-			});
-		});
+		await this.enqueueWrite(async () =>
+			this.entryMutations.updateEntry(entryId, draft, expectedVaultRevision),
+		);
 	}
 
 	async deleteEntry(entryId: string): Promise<void> {
-		await this.enqueueWrite(async () => {
-			const nextEntries = this.session
-				.requireUnlockedEntries()
-				.filter((entry) => entry.id !== entryId);
-			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
-				bumpVaultRevision: true,
-			});
-		});
+		await this.enqueueWrite(async () => this.entryMutations.deleteEntry(entryId));
 	}
 
 	async deleteEntries(entryIds: readonly string[]): Promise<void> {
-		await this.enqueueWrite(async () => {
-			const idsToDelete = new Set(entryIds);
-			const nextEntries = this.session
-				.requireUnlockedEntries()
-				.filter((entry) => !idsToDelete.has(entry.id));
-			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
-				bumpVaultRevision: true,
-			});
-		});
+		await this.enqueueWrite(async () => this.entryMutations.deleteEntries(entryIds));
 	}
 
 	async reorderEntriesByIds(nextOrderedIds: readonly string[]): Promise<void> {
-		await this.enqueueWrite(async () => {
-			const currentEntries = this.session.requireUnlockedEntries();
-			const entriesById = new Map(currentEntries.map((entry) => [entry.id, entry] as const));
-			const seenIds = new Set<string>();
-			const nextEntries: TotpEntryRecord[] = [];
-
-			for (const entryId of nextOrderedIds) {
-				const entry = entriesById.get(entryId);
-
-				if (!entry || seenIds.has(entryId)) {
-					continue;
-				}
-
-				nextEntries.push(entry);
-				seenIds.add(entryId);
-			}
-
-			for (const entry of currentEntries) {
-				if (seenIds.has(entry.id)) {
-					continue;
-				}
-
-				nextEntries.push(entry);
-			}
-
-			await this.encryptedVaultManager.commitUnlockedEntries(nextEntries, {
-				bumpVaultRevision: true,
-			});
-		});
+		await this.enqueueWrite(async () =>
+			this.entryMutations.reorderEntriesByIds(nextOrderedIds),
+		);
 	}
 
 	async commitBulkImport(
 		submission: BulkOtpauthImportSubmission,
 	): Promise<BulkOtpauthImportCommitResult> {
-		return this.enqueueWrite(async () => {
-			this.assertVaultRevision(
-				submission.expectedVaultRevision,
-				"bulk_import_preview_stale",
-			);
-
-			const commitResult = applyBulkOtpauthImportPreview(submission.preview, {
-				existingEntries: this.session.requireUnlockedEntries(),
-				selectedDuplicateLineNumbers: [...submission.selectedDuplicateLineNumbers],
-				createId: () => this.dependencies.createId(),
-			});
-
-			if (
-				commitResult.addedEntries.length === 0 &&
-				commitResult.replacedEntries.length === 0
-			) {
-				return commitResult;
-			}
-
-			await this.encryptedVaultManager.commitUnlockedEntries(commitResult.nextEntries, {
-				bumpVaultRevision: true,
-			});
-			return commitResult;
-		});
+		return this.enqueueWrite(async () =>
+			this.entryMutations.commitBulkImport(submission),
+		);
 	}
 
 	async resetVault(): Promise<void> {
 		await this.enqueueWrite(async () => {
-			await this.encryptedVaultManager.resetVault();
+			await this.encryptedVaultManager.resetVault({
+				persistedUnlock: null,
+			});
 		});
 	}
 

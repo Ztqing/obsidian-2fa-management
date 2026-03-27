@@ -1,6 +1,8 @@
 import { DEFAULT_PLUGIN_DATA } from "../constants";
 import { normalizePluginDataWithIssues } from "../data/store";
 import type {
+	LockTimeoutMode,
+	PersistedUnlockData,
 	PluginData,
 	PluginSettings,
 	PreferredSide,
@@ -42,8 +44,24 @@ export class VaultRepository {
 		return this.pluginData.vaultRevision;
 	}
 
+	getPersistedUnlock(): PersistedUnlockData | null {
+		return this.pluginData.persistedUnlock;
+	}
+
 	getPreferredSide(): PreferredSide {
 		return this.pluginData.settings.preferredSide;
+	}
+
+	getLockTimeoutMode(): LockTimeoutMode {
+		return this.pluginData.settings.lockTimeoutMode;
+	}
+
+	getLockTimeoutMinutes(): number {
+		return this.pluginData.settings.lockTimeoutMinutes;
+	}
+
+	isInsecurePersistedUnlockFallbackEnabled(): boolean {
+		return this.pluginData.settings.allowInsecurePersistedUnlockFallback;
 	}
 
 	shouldShowUpcomingCodes(): boolean {
@@ -52,11 +70,16 @@ export class VaultRepository {
 
 	createNextPluginData(options: {
 		bumpVaultRevision?: boolean;
+		persistedUnlock?: PluginData["persistedUnlock"];
 		settings?: PluginSettings;
 		vault?: PluginData["vault"];
 	}): PluginData {
 		return {
 			...this.pluginData,
+			persistedUnlock:
+				typeof options.persistedUnlock === "undefined"
+					? this.pluginData.persistedUnlock
+					: options.persistedUnlock,
 			settings: options.settings ?? this.pluginData.settings,
 			vault:
 				typeof options.vault === "undefined" ? this.pluginData.vault : options.vault,
@@ -66,10 +89,17 @@ export class VaultRepository {
 		};
 	}
 
-	async persistPluginData(data: PluginData, vaultLoadIssue: VaultLoadIssue | null = null): Promise<void> {
-		await this.dependencies.saveData(data);
+	replacePluginData(
+		data: PluginData,
+		vaultLoadIssue: VaultLoadIssue | null = null,
+	): void {
 		this.pluginData = data;
 		this.vaultLoadIssue = vaultLoadIssue;
+	}
+
+	async persistPluginData(data: PluginData, vaultLoadIssue: VaultLoadIssue | null = null): Promise<void> {
+		await this.dependencies.saveData(data);
+		this.replacePluginData(data, vaultLoadIssue);
 	}
 
 	async persistSettings(nextSettings: Partial<PluginSettings>): Promise<void> {

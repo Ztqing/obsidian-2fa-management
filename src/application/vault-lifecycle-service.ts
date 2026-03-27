@@ -6,10 +6,21 @@ export class VaultLifecycleService {
 	constructor(private readonly environment: TwoFactorPluginActionEnvironment) {}
 
 	lockVault(showNotice = false): void {
+		this.completeLock(showNotice, "notice.vaultLocked");
+	}
+
+	lockVaultDueToTimeout(): void {
+		this.completeLock(true, "notice.vaultLockedDueToTimeout");
+	}
+
+	private completeLock(
+		showNotice: boolean,
+		noticeKey: Parameters<TwoFactorPluginActionEnvironment["t"]>[0],
+	): void {
 		this.environment.service.lockVault();
 		clearSharedPreparedTotpEntryCache();
 		if (showNotice) {
-			this.environment.showNotice?.(this.environment.t("notice.vaultLocked"));
+			this.environment.showNotice?.(this.environment.t(noticeKey));
 		}
 		void this.environment.refreshAllViews("availability");
 	}

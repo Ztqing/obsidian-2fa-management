@@ -14,8 +14,11 @@ export type TwoFaUserErrorCode =
 	| "image_read_failed"
 	| "incorrect_master_password"
 	| "invalid_otpauth_uri"
+	| "lock_timeout_minutes_invalid"
 	| "otpauth_totp_only"
 	| "period_out_of_range"
+	| "persisted_unlock_compatibility_mode_required"
+	| "persisted_unlock_unavailable"
 	| "qr_not_found"
 	| "secret_base32_too_short"
 	| "secret_invalid_base32"
@@ -60,8 +63,12 @@ export const USER_ERROR_TRANSLATION_KEYS: Record<TwoFaUserErrorCode, Translation
 	image_read_failed: "error.imageReadFailed",
 	incorrect_master_password: "error.incorrectMasterPassword",
 	invalid_otpauth_uri: "error.invalidOtpauthUri",
+	lock_timeout_minutes_invalid: "error.lockTimeoutMinutesInvalid",
 	otpauth_totp_only: "error.otpauthTotpOnly",
 	period_out_of_range: "error.periodOutOfRange",
+	persisted_unlock_compatibility_mode_required:
+		"error.persistedUnlockCompatibilityModeRequired",
+	persisted_unlock_unavailable: "error.persistedUnlockUnavailable",
 	qr_not_found: "error.qrNotFound",
 	secret_base32_too_short: "error.secretBase32TooShort",
 	secret_invalid_base32: "error.secretInvalidBase32",

@@ -59,6 +59,12 @@ function createEnvironment(options: {
 			callLog.push(`service.deleteEntry:${entryId}`);
 		},
 		getEntries: () => entries,
+		getPersistedUnlockCapability: () => ({
+			availability: "available" as const,
+			source: "safe-storage" as const,
+		}),
+		getLockTimeoutMinutes: () => 15,
+		getLockTimeoutMode: () => "on-restart" as const,
 		getPreferredSide: () => "right" as const,
 		getVaultRevision: () => 0,
 		initializeVault: async (password: string) => {
@@ -67,6 +73,7 @@ function createEnvironment(options: {
 			isUnlocked = true;
 		},
 		hasVaultLoadIssue: () => hasVaultLoadIssue,
+		isInsecurePersistedUnlockFallbackEnabled: () => false,
 		isUnlocked: () => isUnlocked,
 		isVaultInitialized: () => isVaultInitialized,
 		lockVault: () => {
@@ -81,6 +88,9 @@ function createEnvironment(options: {
 			isUnlocked = false;
 			isVaultInitialized = false;
 		},
+		setInsecurePersistedUnlockFallbackEnabled: async () => {},
+		setLockTimeoutMinutes: async () => {},
+		setLockTimeoutMode: async () => {},
 		setPreferredSide: async () => {},
 		setShowUpcomingCodes: async () => {},
 		shouldShowUpcomingCodes: () => false,
@@ -273,5 +283,20 @@ test("TwoFactorPluginActions confirms reset with typed confirmation and refreshe
 		"service.resetVault",
 		"refreshAllViews",
 		"notice:notice.vaultCleared",
+	]);
+});
+
+test("TwoFactorPluginActions locks the vault with a timeout-specific notice", () => {
+	const { actions, callLog } = createEnvironment({
+		isUnlocked: true,
+		isVaultInitialized: true,
+	});
+
+	actions.lockVaultDueToTimeout();
+
+	assert.deepEqual(callLog, [
+		"service.lockVault",
+		"notice:notice.vaultLockedDueToTimeout",
+		"refreshAllViews",
 	]);
 });

@@ -21,6 +21,10 @@ export class TwoFactorPluginActions {
 		this.vaultLifecycle.lockVault(showNotice);
 	}
 
+	lockVaultDueToTimeout(): void {
+		this.vaultLifecycle.lockVaultDueToTimeout();
+	}
+
 	async promptToInitializeVault(): Promise<boolean> {
 		return this.vaultLifecycle.promptToInitializeVault();
 	}

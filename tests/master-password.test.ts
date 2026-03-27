@@ -11,13 +11,19 @@ test("validateMasterPasswordInput rejects empty passwords", () => {
 
 test("validateMasterPasswordInput enforces minimum length only when provided", () => {
 	assert.equal(
-		validateMasterPasswordInput("short-pass", {
+		validateMasterPasswordInput("12345", {
 			minimumLength: MIN_MASTER_PASSWORD_LENGTH,
 		}),
 		"too_short",
 	);
 	assert.equal(
-		validateMasterPasswordInput("short-pass"),
+		validateMasterPasswordInput("12345"),
+		null,
+	);
+	assert.equal(
+		validateMasterPasswordInput("123456", {
+			minimumLength: MIN_MASTER_PASSWORD_LENGTH,
+		}),
 		null,
 	);
 });

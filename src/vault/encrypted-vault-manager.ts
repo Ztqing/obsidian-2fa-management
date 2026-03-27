@@ -10,11 +10,17 @@ export class EncryptedVaultManager {
 		private readonly session: VaultSession,
 	) {}
 
-	async initialize(password: string): Promise<void> {
+	async initialize(
+		password: string,
+		options: {
+			persistedUnlock?: PluginData["persistedUnlock"];
+		} = {},
+	): Promise<void> {
 		const nextEntries: TotpEntryRecord[] = [];
 		const nextVault = await encryptVaultEntries(nextEntries, password);
 		const nextPluginData = this.repository.createNextPluginData({
 			bumpVaultRevision: true,
+			persistedUnlock: options.persistedUnlock,
 			vault: nextVault,
 		});
 
@@ -22,12 +28,18 @@ export class EncryptedVaultManager {
 		this.session.begin(nextEntries, password);
 	}
 
-	async changeMasterPassword(nextPassword: string): Promise<void> {
+	async changeMasterPassword(
+		nextPassword: string,
+		options: {
+			persistedUnlock?: PluginData["persistedUnlock"];
+		} = {},
+	): Promise<void> {
 		const currentEntries = this.session.requireUnlockedEntries();
 		const currentSessionToken = this.session.getSessionToken();
 		const nextVault = await encryptVaultEntries(currentEntries, nextPassword);
 		const nextPluginData = this.repository.createNextPluginData({
 			bumpVaultRevision: true,
+			persistedUnlock: options.persistedUnlock,
 			vault: nextVault,
 		});
 
@@ -55,11 +67,16 @@ export class EncryptedVaultManager {
 		this.session.sync(nextEntries, nextPassword, currentSessionToken);
 	}
 
-	async resetVault(): Promise<void> {
+	async resetVault(
+		options: {
+			persistedUnlock?: PluginData["persistedUnlock"];
+		} = {},
+	): Promise<void> {
 		const pluginData = this.repository.getPluginData();
 		const nextPluginData: PluginData = this.repository.createNextPluginData({
 			bumpVaultRevision:
 				pluginData.vault !== null || this.session.getEntries().length > 0,
+			persistedUnlock: options.persistedUnlock ?? null,
 			vault: null,
 		});
 

@@ -13,6 +13,9 @@ const fixtureEntry = {
 
 test("normalizePluginData defaults active settings and ignores legacy floating-lock data", () => {
 	assert.deepEqual(normalizePluginData({}).settings, {
+		allowInsecurePersistedUnlockFallback: false,
+		lockTimeoutMinutes: 15,
+		lockTimeoutMode: "on-restart",
 		preferredSide: "right",
 		showUpcomingCodes: false,
 	});
@@ -41,10 +44,30 @@ test("normalizePluginData defaults active settings and ignores legacy floating-l
 	}).settings as unknown as Record<string, unknown>;
 
 	assert.deepEqual(normalizedSettings, {
+		allowInsecurePersistedUnlockFallback: false,
+		lockTimeoutMinutes: 15,
+		lockTimeoutMode: "on-restart",
 		preferredSide: "right",
 		showUpcomingCodes: true,
 	});
 	assert.equal("showFloatingLockButton" in normalizedSettings, false);
+});
+
+test("normalizePluginData ignores invalid persisted unlock payloads without affecting vault load", () => {
+	const normalized = normalizePluginData({
+		persistedUnlock: {
+			protectedPasswordB64: 123,
+			version: 1,
+		},
+		settings: {
+			rememberUnlockOnRestart: true,
+		},
+	});
+
+	assert.equal(normalized.persistedUnlock, null);
+	assert.equal(normalized.settings.lockTimeoutMode, "never");
+	assert.equal(normalized.settings.allowInsecurePersistedUnlockFallback, false);
+	assert.equal(normalized.settings.lockTimeoutMinutes, 15);
 });
 
 test("createTotpDisplaySnapshot includes the next code and refresh progress", async () => {

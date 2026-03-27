@@ -15,6 +15,7 @@ import {
 } from "./totp-entry-import";
 import { createTotpEntryForm, type TotpEntryForm } from "./totp-entry-form";
 import { TotpEntryImportPresenter } from "./totp-entry-import-presenter";
+import { bindModalSessionActivity } from "./session-activity";
 
 class TotpEntryModal extends Modal {
 	private readonly plugin: TwoFactorManagementPlugin;
@@ -43,6 +44,9 @@ class TotpEntryModal extends Modal {
 	}
 
 	onOpen(): void {
+		bindModalSessionActivity(this.modalEl, () => {
+			this.plugin.recordSessionActivity();
+		});
 		this.titleEl.setText(
 			this.isEditing
 				? this.plugin.t("modal.entry.editTitle")

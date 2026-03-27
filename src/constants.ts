@@ -3,6 +3,7 @@ import type { PluginData, TotpAlgorithm, TotpEntryDraft } from "./types";
 export const OBSIDIAN_2FA_VIEW = "OBSIDIAN_2FA_VIEW";
 
 export const VAULT_DATA_VERSION = 1;
+export const PERSISTED_UNLOCK_DATA_VERSION = 2;
 export const PLUGIN_DATA_SCHEMA_VERSION = 1;
 
 export const PBKDF2_ITERATIONS = 250_000;
@@ -10,6 +11,8 @@ export const PBKDF2_HASH = "SHA-256";
 export const ENCRYPTION_KEY_LENGTH = 256;
 export const ENCRYPTION_SALT_BYTES = 16;
 export const ENCRYPTION_IV_BYTES = 12;
+export const DEFAULT_LOCK_TIMEOUT_MINUTES = 15;
+export const MIN_LOCK_TIMEOUT_MINUTES = 1;
 export const QR_IMPORT_MAX_DIMENSION = 2_048;
 export const QR_IMPORT_MAX_PIXELS = 1_048_576;
 
@@ -30,9 +33,13 @@ export const SUPPORTED_TOTP_ALGORITHMS: readonly TotpAlgorithm[] = [
 
 export const DEFAULT_PLUGIN_DATA: PluginData = {
 	schemaVersion: PLUGIN_DATA_SCHEMA_VERSION,
+	persistedUnlock: null,
 	vaultRevision: 0,
 	vault: null,
 	settings: {
+		allowInsecurePersistedUnlockFallback: false,
+		lockTimeoutMinutes: DEFAULT_LOCK_TIMEOUT_MINUTES,
+		lockTimeoutMode: "on-restart",
 		preferredSide: "right",
 		showUpcomingCodes: false,
 	},

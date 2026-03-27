@@ -67,6 +67,7 @@ test("registerPluginCommands keeps stable ids and guards async command failures"
 			throw new Error("open failed");
 		},
 		promptToUnlockVault: async () => true,
+		recordSessionActivity: () => {},
 		showNotice: (message) => {
 			notices.push(message);
 		},

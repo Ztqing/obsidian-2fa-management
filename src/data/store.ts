@@ -1,10 +1,12 @@
 import {
+	DEFAULT_LOCK_TIMEOUT_MINUTES,
 	DEFAULT_PLUGIN_DATA,
 	DEFAULT_TOTP_ENTRY,
 	MAX_TOTP_DIGITS,
 	MAX_TOTP_PERIOD,
 	MIN_TOTP_DIGITS,
 	MIN_TOTP_PERIOD,
+	PERSISTED_UNLOCK_DATA_VERSION,
 	PLUGIN_DATA_SCHEMA_VERSION,
 	VAULT_DATA_VERSION,
 } from "../constants";
@@ -13,6 +15,8 @@ import { sanitizeBase32Secret } from "../totp/base32";
 import { normalizeAlgorithm } from "../totp/totp";
 import type {
 	EncryptedVaultData,
+	LockTimeoutMode,
+	PersistedUnlockData,
 	PluginData,
 	PreferredSide,
 	TotpEntryDraft,
@@ -37,9 +41,36 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
 	return typeof value === "boolean" ? value : fallback;
 }
 
+function normalizeLockTimeoutMode(
+	settings: Record<string, unknown>,
+	fallback: LockTimeoutMode,
+): LockTimeoutMode {
+	if (
+		settings.lockTimeoutMode === "custom" ||
+		settings.lockTimeoutMode === "on-restart" ||
+		settings.lockTimeoutMode === "never"
+	) {
+		return settings.lockTimeoutMode;
+	}
+
+	if (typeof settings.rememberUnlockOnRestart === "boolean") {
+		return settings.rememberUnlockOnRestart ? "never" : "on-restart";
+	}
+
+	return fallback;
+}
+
 function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
 	const parsed = typeof value === "number" ? value : Number(value);
 	return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function normalizePositiveIntegerWithFallback(
+	value: unknown,
+	fallback: number,
+): number {
+	const parsed = typeof value === "number" ? value : Number(value);
+	return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function normalizeString(value: unknown): string {
@@ -74,6 +105,28 @@ export function isEncryptedVaultData(value: unknown): value is EncryptedVaultDat
 		typeof value.saltB64 === "string" &&
 		typeof value.ivB64 === "string" &&
 		typeof value.cipherTextB64 === "string"
+	);
+}
+
+export function isPersistedUnlockData(value: unknown): value is PersistedUnlockData {
+	if (!isRecord(value)) {
+		return false;
+	}
+
+	if (
+		value.version === 1 &&
+		typeof value.protectedPasswordB64 === "string"
+	) {
+		return true;
+	}
+
+	return (
+		(value.version === PERSISTED_UNLOCK_DATA_VERSION &&
+			value.kind === "safe-storage" &&
+			typeof value.protectedPasswordB64 === "string") ||
+		(value.version === PERSISTED_UNLOCK_DATA_VERSION &&
+			value.kind === "compatibility-fallback" &&
+			typeof value.plainPassword === "string")
 	);
 }
 
@@ -112,9 +165,15 @@ export function normalizePluginDataWithIssues(value: unknown): {
 		return {
 			pluginData: {
 				schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+				persistedUnlock: DEFAULT_PLUGIN_DATA.persistedUnlock,
 				vaultRevision: DEFAULT_PLUGIN_DATA.vaultRevision,
 				vault: DEFAULT_PLUGIN_DATA.vault,
 				settings: {
+					allowInsecurePersistedUnlockFallback:
+						DEFAULT_PLUGIN_DATA.settings.allowInsecurePersistedUnlockFallback,
+					lockTimeoutMinutes:
+						DEFAULT_PLUGIN_DATA.settings.lockTimeoutMinutes,
+					lockTimeoutMode: DEFAULT_PLUGIN_DATA.settings.lockTimeoutMode,
 					preferredSide: DEFAULT_PLUGIN_DATA.settings.preferredSide,
 					showUpcomingCodes: DEFAULT_PLUGIN_DATA.settings.showUpcomingCodes,
 				},
@@ -130,12 +189,27 @@ export function normalizePluginDataWithIssues(value: unknown): {
 	return {
 		pluginData: {
 			schemaVersion: DEFAULT_PLUGIN_DATA.schemaVersion,
+			persistedUnlock: isPersistedUnlockData(value.persistedUnlock)
+				? value.persistedUnlock
+				: DEFAULT_PLUGIN_DATA.persistedUnlock,
 			vaultRevision: normalizeNonNegativeInteger(
 				value.vaultRevision,
 				DEFAULT_PLUGIN_DATA.vaultRevision,
 			),
 			vault,
 			settings: {
+				allowInsecurePersistedUnlockFallback: normalizeBoolean(
+					rawSettings.allowInsecurePersistedUnlockFallback,
+					DEFAULT_PLUGIN_DATA.settings.allowInsecurePersistedUnlockFallback,
+				),
+				lockTimeoutMinutes: normalizePositiveIntegerWithFallback(
+					rawSettings.lockTimeoutMinutes,
+					DEFAULT_LOCK_TIMEOUT_MINUTES,
+				),
+				lockTimeoutMode: normalizeLockTimeoutMode(
+					rawSettings,
+					DEFAULT_PLUGIN_DATA.settings.lockTimeoutMode,
+				),
 				preferredSide: normalizePreferredSide(rawSettings.preferredSide),
 				showUpcomingCodes: normalizeBoolean(
 					rawSettings.showUpcomingCodes,

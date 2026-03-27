@@ -4,6 +4,7 @@ import {
 	type MasterPasswordValidationIssue,
 	validateMasterPasswordInput,
 } from "../../security/master-password";
+import { bindModalSessionActivity } from "./session-activity";
 
 export interface MasterPasswordPromptOptions {
 	title: string;
@@ -34,6 +35,9 @@ class MasterPasswordModal extends Modal {
 	}
 
 	onOpen(): void {
+		bindModalSessionActivity(this.modalEl, () => {
+			this.plugin.recordSessionActivity();
+		});
 		this.titleEl.setText(this.options.title);
 		this.contentEl.createEl("p", {
 			text: this.options.description,

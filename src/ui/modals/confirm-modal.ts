@@ -1,4 +1,5 @@
 import { App, Modal, Setting, TextComponent } from "obsidian";
+import { bindModalSessionActivity } from "./session-activity";
 
 export interface ConfirmationOptions {
 	cancelLabel: string;
@@ -14,19 +15,29 @@ export interface ConfirmationOptions {
 
 class ConfirmationModal extends Modal {
 	private readonly options: ConfirmationOptions;
+	private readonly onActivity?: () => void;
 	private readonly resolve: (confirmed: boolean) => void;
 	private confirmationInput: TextComponent | null = null;
 	private confirmButton: HTMLButtonElement | null = null;
 	private statusEl: HTMLElement | null = null;
 	private settled = false;
 
-	constructor(app: App, options: ConfirmationOptions, resolve: (confirmed: boolean) => void) {
+	constructor(
+		app: App,
+		options: ConfirmationOptions,
+		resolve: (confirmed: boolean) => void,
+		onActivity?: () => void,
+	) {
 		super(app);
 		this.options = options;
 		this.resolve = resolve;
+		this.onActivity = onActivity;
 	}
 
 	onOpen(): void {
+		if (this.onActivity) {
+			bindModalSessionActivity(this.modalEl, this.onActivity);
+		}
 		this.titleEl.setText(this.options.title);
 		this.contentEl.createEl("p", {
 			text: this.options.description,
@@ -125,8 +136,12 @@ class ConfirmationModal extends Modal {
 	}
 }
 
-export function confirmAction(app: App, options: ConfirmationOptions): Promise<boolean> {
+export function confirmAction(
+	app: App,
+	options: ConfirmationOptions,
+	onActivity?: () => void,
+): Promise<boolean> {
 	return new Promise((resolve) => {
-		new ConfirmationModal(app, options, resolve).open();
+		new ConfirmationModal(app, options, resolve, onActivity).open();
 	});
 }
