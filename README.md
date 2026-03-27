@@ -33,7 +33,7 @@ The desktop-first local encrypted TOTP workflow is already in place. The checkli
 - [x] Establish a desktop-first release baseline with tests for encryption, TOTP, import flows, view interactions, command guards, and the version script.
 - [ ] Finish the current workspace polish around toolbar consolidation, copy feedback, code animation and layout, and unlock race hardening.
 - [ ] Add encrypted export and import with preflight validation and recovery guidance, without adding plaintext export.
-- [ ] Harden session safety with idle auto-lock, lock-on-blur or resume behavior, and optional clipboard auto-clear.
+- [ ] Continue hardening session safety with additional lock-on-blur or resume behavior and optional clipboard auto-clear, building on the new inactivity timeout and restart lock policies.
 - [ ] Move from clear-only repair toward safer data migration and compatibility handling.
 - [ ] Expand the desktop regression checklist around real release flows and larger data sets.
 - [ ] Revisit mobile support after dedicated validation beyond the current `isDesktopOnly: true` release scope.
@@ -44,7 +44,11 @@ The roadmap prioritizes data safety, offline usability, and desktop stability.
 ## Security model
 
 - Secrets are stored in Obsidian plugin data, then encrypted locally with Web Crypto using PBKDF2 + AES-GCM before saving.
-- The master password is only kept in memory for the current Obsidian session after unlock, and the vault stays unlocked until you lock it manually or restart Obsidian.
+- The master password must be at least 6 characters long.
+- The default lock policy is **On Obsidian restart**, which keeps the master password in memory only until you lock the vault manually or restart Obsidian.
+- You can switch the lock policy to a custom inactivity timeout, **On Obsidian restart**, or **Never**. The **Never** policy stores the unlock secret for restart recovery.
+- When the desktop exposes Electron `safeStorage`, **Never** uses that backend and may warn if the desktop only provides weak plain-text-backed protection.
+- When restart-recoverable secure storage is unavailable, you can explicitly enable a low-security compatibility mode for **Never**. That fallback stores the unlock secret directly in plugin data and should only be used on a private device you trust.
 - There is no password recovery flow. If you forget the master password, the vault must be cleared and recreated.
 - Copying a code writes it to the system clipboard. The plugin does not automatically clear clipboard history.
 - The plugin does not upload your data, but encrypted plugin data can still be copied by your own device backups or sync tools.
@@ -53,10 +57,12 @@ The roadmap prioritizes data safety, offline usability, and desktop stability.
 ## Usage
 
 1. Open **2FA Management: Open 2FA view** from the command palette.
-2. Create the encrypted vault and choose a master password.
+2. Create the encrypted vault and choose a master password with at least 6 characters.
 3. Add entries manually, paste an `otpauth://` URI, or import a QR image.
-4. For migration, use **Bulk import** in the 2FA view or the bulk import command, then review duplicates before saving.
-5. Unlock the vault when needed to copy current TOTP codes.
+4. Choose a lock policy in Settings: a custom inactivity timeout, **On Obsidian restart**, or **Never**.
+5. If this desktop cannot provide restart-recoverable secure storage and you still want **Never**, explicitly enable the low-security compatibility mode in Settings first.
+6. For migration, use **Bulk import** in the 2FA view or the bulk import command, then review duplicates before saving.
+7. Unlock the vault when needed to copy current TOTP codes.
 
 ## Bulk import scope
 
@@ -70,6 +76,7 @@ The roadmap prioritizes data safety, offline usability, and desktop stability.
 - This release is marked desktop-only in `manifest.json`.
 - There is no export or recovery flow yet. Keep your original 2FA enrollment or backup material before relying on this vault as your only copy.
 - If stored vault data becomes unreadable or incompatible, the plugin now asks you to clear it explicitly before creating a new vault.
+- The low-security compatibility mode for **Never** is opt-in and device-local. Disabling it clears its saved restart-unlock data and may switch the lock policy back to **On Obsidian restart** if no secure backend is available.
 
 ## Development
 
